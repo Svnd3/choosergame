@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta
+			name="viewport"
+			content="width=device-width, initial-scale=1, user-scalable=no"
+		/>
+		<link rel="canonical" href="https://chooser.kuehle.me" />
+		<title>Player Chooser</title>
+		<link rel="manifest" href="manifest.webmanifest" />
+		<link rel="icon" sizes="48x48" href="images/logo-48.png" />
+		<link rel="icon" sizes="96x96" href="images/logo-96.png" />
+		<link rel="icon" sizes="144x144" href="images/logo-144.png" />
+		<link rel="icon" sizes="192x192" href="images/logo-192.png" />
+		<link rel="apple-touch-icon" href="images/logo-192-opaque.png" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta
+			name="apple-mobile-web-app-status-bar-style"
+			content="black-translucent"
+		/>
+		<meta name="theme-color" content="#ff0739" />
+		<link rel="stylesheet" href="index.css" />
+		<script type="module" src="index.js"></script>
+	</head>
+	<body>
+		<canvas id="board"></canvas>
+		<p id="description">
+			Make all players put one finger on the screen. After 2 seconds one
+			player is chosen at random.
+		</p>
+		<div
+			id="live-region"
+			aria-live="assertive"
+			class="visually-hidden"
+		></div>
+		<p id="version"></p>
+		<p id="update-available" hidden>
+			Update available. <a href="">Reload</a> to apply.
+		</p>
+	</body>
+</html>
