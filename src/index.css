@@ -25,7 +25,7 @@ body {
 
 body {
 	margin: 0;
-	background: #050608;
+	background: #000;
 	color: var(--ink);
 	touch-action: auto;
 	-webkit-tap-highlight-color: transparent;
@@ -49,6 +49,17 @@ input:focus-visible {
 }
 
 [hidden] {
+	display: none !important;
+}
+
+body[data-game-state="idle"] #board {
+	opacity: 0;
+}
+
+body[data-game-state="idle"] .topbar,
+body[data-game-state="idle"] #game-ui,
+body[data-game-state="idle"] #version,
+body[data-game-state="idle"] #update-available {
 	display: none !important;
 }
 
