@@ -7,7 +7,8 @@ import {
 
 const MIN_PLAYERS = 2;
 const CHOOSE_DELAY_MS = 2000;
-const REVEAL_DURATION_MS = 680;
+const REVEAL_ANIMATION_DURATION_MS = 680;
+const WINNER_DISPLAY_DURATION_MS = 3000;
 const COUNTDOWN_HAPTIC_INTERVAL_MS = 400;
 const ELECTRIC_DOT_SPEED = 1.15;
 const SETTINGS_STORAGE_KEY = "chooser-game-settings-v2";
@@ -648,7 +649,10 @@ function farthestCornerRadius(x, y) {
 }
 
 function drawReveal(now) {
-	const progress = Math.min(1, (now - revealStartedAt) / REVEAL_DURATION_MS);
+	const progress = Math.min(
+		1,
+		(now - revealStartedAt) / REVEAL_ANIMATION_DURATION_MS,
+	);
 	const eased = easeOutQuint(progress);
 	const winner = result.winner;
 	const hue = playerHue(winner.slot);
@@ -797,7 +801,7 @@ function render(now) {
 		drawConnectors(now);
 		for (const player of players.values()) drawPlayer(player, progress);
 	} else if (gameState === "reveal") {
-		if (now - revealStartedAt >= REVEAL_DURATION_MS) {
+		if (now - revealStartedAt >= WINNER_DISPLAY_DURATION_MS) {
 			setGameState("result");
 			updateNextRoundAvailability();
 			drawResult();
