@@ -9,6 +9,7 @@ const MIN_PLAYERS = 2;
 const CHOOSE_DELAY_MS = 2000;
 const REVEAL_DURATION_MS = 680;
 const COUNTDOWN_HAPTIC_INTERVAL_MS = 400;
+const ELECTRIC_DOT_SPEED = 1.15;
 const SETTINGS_STORAGE_KEY = "chooser-game-settings-v2";
 const DEFAULT_ACCENT = "#ff315f";
 const PLAYER_HUES = [346, 192, 48, 268, 124, 24, 218, 305, 88, 164, 10, 240];
@@ -68,6 +69,7 @@ let gameState = "idle";
 let completedRounds = 0;
 let roundIdentityStyle = "numbers";
 let connectorEdges = [];
+let connectorRoute = [];
 let countdownStartedAt = 0;
 let countdownDeadline = 0;
 let hapticMilestonesFired = 0;
@@ -252,9 +254,11 @@ function identityName(player, style = roundIdentityStyle) {
 function buildConnectorTopology() {
 	const nodes = [...players.values()];
 	connectorEdges = [];
+	connectorRoute = [];
 
 	if (nodes.length < 2) {
 		collectingPanel.dataset.connectorCount = "0";
+		collectingPanel.dataset.travelingDotCount = "0";
 		return;
 	}
 
@@ -277,12 +281,29 @@ function buildConnectorTopology() {
 		connectorEdges.push({
 			a: shortest.from,
 			b: shortest.to,
-			seed: connectorEdges.length * 173 + connectedIds.size * 97,
 		});
 		connectedIds.add(shortest.to);
 	}
 
 	collectingPanel.dataset.connectorCount = String(connectorEdges.length);
+	const adjacency = new Map(
+		nodes.map((player) => [player.pointerId, []]),
+	);
+	for (const edge of connectorEdges) {
+		adjacency.get(edge.a)?.push(edge.b);
+		adjacency.get(edge.b)?.push(edge.a);
+	}
+
+	const visit = (pointerId, parentId = null) => {
+		connectorRoute.push(pointerId);
+		for (const neighborId of adjacency.get(pointerId) ?? []) {
+			if (neighborId === parentId) continue;
+			visit(neighborId, pointerId);
+			connectorRoute.push(pointerId);
+		}
+	};
+	visit(nodes[0].pointerId);
+	collectingPanel.dataset.travelingDotCount = "1";
 }
 
 function beginCountdown(now = performance.now()) {
@@ -410,7 +431,39 @@ function shapePath(shape, radius) {
 		return;
 	}
 
-	ctx.arc(0, 0, radius * 0.78, 0, Math.PI * 2);
+	ctx.arc(0, 0, radius, 0, Math.PI * 2);
+}
+
+function beginPlayerHaloPath(player, radius, style = roundIdentityStyle) {
+	ctx.beginPath();
+	if (style === "numbers") {
+		ctx.arc(player.x, player.y, radius, 0, Math.PI * 2);
+		return;
+	}
+
+	ctx.save();
+	ctx.translate(player.x, player.y);
+	shapePath(SHAPES[player.slot % SHAPES.length], radius);
+	ctx.restore();
+}
+
+function shapePerimeter(shape, radius) {
+	if (shape.kind === "polygon") {
+		return 2 * shape.sides * radius * Math.sin(Math.PI / shape.sides);
+	}
+	if (shape.kind === "star") {
+		const innerRadius = radius * 0.44;
+		const edge = Math.sqrt(
+			radius ** 2 +
+				innerRadius ** 2 -
+				2 * radius * innerRadius * Math.cos(Math.PI / 5),
+		);
+		return edge * 10;
+	}
+	if (shape.kind === "cross") return radius * 7.7;
+	if (shape.kind === "heart") return radius * 6.2;
+	if (shape.kind === "bolt") return radius * 6.8;
+	return Math.PI * 2 * radius;
 }
 
 function drawIdentity(player, style, scale = 1, alpha = 1) {
@@ -462,97 +515,101 @@ function drawIdentityBadge(player, style, scale = 1, alpha = 1) {
 function drawPlayer(player, progress = 0, alpha = 1, scale = 1) {
 	const outerRadius = 47 * scale;
 	const innerRadius = 34 * scale;
+	const isShapeRound = roundIdentityStyle === "shapes";
 	ctx.save();
 	ctx.globalAlpha = alpha;
 
-	ctx.beginPath();
+	beginPlayerHaloPath(player, outerRadius);
 	ctx.strokeStyle = playerColor(player.slot, 0.95);
 	ctx.lineWidth = 2.4 * scale;
 	ctx.shadowColor = playerColor(player.slot, 0.8);
 	ctx.shadowBlur = 16 * scale;
-	ctx.arc(player.x, player.y, outerRadius, 0, Math.PI * 2);
 	ctx.stroke();
 
 	ctx.shadowBlur = 0;
-	ctx.beginPath();
+	beginPlayerHaloPath(player, innerRadius);
 	ctx.fillStyle = "rgba(3, 4, 7, 0.92)";
 	ctx.strokeStyle = playerColor(player.slot, 0.38);
 	ctx.lineWidth = 1;
-	ctx.arc(player.x, player.y, innerRadius, 0, Math.PI * 2);
 	ctx.fill();
 	ctx.stroke();
 
 	if (progress > 0) {
-		ctx.beginPath();
 		ctx.strokeStyle = playerColor(player.slot, 0.98, 72);
 		ctx.lineCap = "round";
 		ctx.lineWidth = 4 * scale;
 		ctx.shadowColor = playerColor(player.slot, 0.9);
 		ctx.shadowBlur = 13 * scale;
-		ctx.arc(
-			player.x,
-			player.y,
-			(outerRadius + 8 * scale),
-			-Math.PI / 2,
-			-Math.PI / 2 + Math.PI * 2 * Math.min(1, progress),
-		);
+		if (isShapeRound) {
+			const progressRadius = outerRadius + 8 * scale;
+			const perimeter = shapePerimeter(
+				SHAPES[player.slot % SHAPES.length],
+				progressRadius,
+			);
+			beginPlayerHaloPath(player, progressRadius);
+			ctx.setLineDash([
+				Math.max(0.01, Math.min(1, progress)) * perimeter,
+				perimeter + 2,
+			]);
+		} else {
+			ctx.beginPath();
+			ctx.arc(
+				player.x,
+				player.y,
+				outerRadius + 8 * scale,
+				-Math.PI / 2,
+				-Math.PI / 2 + Math.PI * 2 * Math.min(1, progress),
+			);
+		}
 		ctx.stroke();
+		ctx.setLineDash([]);
 	}
 
 	ctx.restore();
-	drawIdentity(player, roundIdentityStyle, scale, alpha);
-	drawIdentityBadge(player, roundIdentityStyle, scale, alpha);
+	if (!isShapeRound) {
+		drawIdentity(player, roundIdentityStyle, scale, alpha);
+		drawIdentityBadge(player, roundIdentityStyle, scale, alpha);
+	}
 }
 
-function drawElectricPulse(from, to, phase, now, opacity, seed) {
-	const dx = to.x - from.x;
-	const dy = to.y - from.y;
-	const length = Math.hypot(dx, dy);
-	if (length < 1) return;
+function drawTravelingConnectorDot(now, opacity) {
+	if (connectorRoute.length < 2) return;
 
-	const tail = Math.min(0.24, 46 / length);
-	const start = Math.max(0, phase - tail);
-	const points = 7;
-	const perpendicularX = -dy / length;
-	const perpendicularY = dx / length;
-	const tick = Math.floor(now / 46);
-	const startX = from.x + dx * start;
-	const startY = from.y + dy * start;
-	const endX = from.x + dx * phase;
-	const endY = from.y + dy * phase;
-	const glow = ctx.createLinearGradient(startX, startY, endX, endY);
-	glow.addColorStop(0, "rgba(80, 206, 255, 0)");
-	glow.addColorStop(0.58, `rgba(85, 220, 255, ${0.72 * opacity})`);
-	glow.addColorStop(1, `rgba(255, 255, 255, ${opacity})`);
+	const segments = [];
+	let routeLength = 0;
+	for (let index = 1; index < connectorRoute.length; index += 1) {
+		const from = players.get(connectorRoute[index - 1]);
+		const to = players.get(connectorRoute[index]);
+		if (!from || !to) continue;
+		const length = Math.hypot(to.x - from.x, to.y - from.y);
+		if (length < 1) continue;
+		segments.push({ from, to, length, startsAt: routeLength });
+		routeLength += length;
+	}
+	if (routeLength < 1) return;
+
+	const elapsed = Math.max(0, now - countdownStartedAt);
+	const routeDuration = Math.min(
+		900,
+		Math.max(280, routeLength / ELECTRIC_DOT_SPEED),
+	);
+	const distance = ((elapsed % routeDuration) / routeDuration) * routeLength;
+	const segment =
+		segments.find(
+			(candidate) => distance < candidate.startsAt + candidate.length,
+		) ?? segments[segments.length - 1];
+	const progress = (distance - segment.startsAt) / segment.length;
+	const x = segment.from.x + (segment.to.x - segment.from.x) * progress;
+	const y = segment.from.y + (segment.to.y - segment.from.y) * progress;
 
 	ctx.save();
+	ctx.globalAlpha = opacity;
 	ctx.globalCompositeOperation = "lighter";
-	ctx.strokeStyle = glow;
-	ctx.lineWidth = 2;
-	ctx.lineCap = "round";
-	ctx.lineJoin = "round";
-	ctx.shadowColor = `rgba(71, 211, 255, ${0.9 * opacity})`;
-	ctx.shadowBlur = 14;
+	ctx.fillStyle = "#ffffff";
+	ctx.shadowColor = "rgba(64, 218, 255, 0.98)";
+	ctx.shadowBlur = 17;
 	ctx.beginPath();
-
-	for (let index = 0; index <= points; index += 1) {
-		const local = index / points;
-		const along = start + (phase - start) * local;
-		const jitter =
-			index === 0 || index === points
-				? 0
-				: Math.sin(seed * 0.17 + tick * 1.93 + index * 8.11) * 2.4;
-		const x = from.x + dx * along + perpendicularX * jitter;
-		const y = from.y + dy * along + perpendicularY * jitter;
-		if (index === 0) ctx.moveTo(x, y);
-		else ctx.lineTo(x, y);
-	}
-	ctx.stroke();
-
-	ctx.beginPath();
-	ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
-	ctx.shadowBlur = 18;
-	ctx.arc(endX, endY, 2.7, 0, Math.PI * 2);
+	ctx.arc(x, y, 3.1, 0, Math.PI * 2);
 	ctx.fill();
 	ctx.restore();
 }
@@ -561,7 +618,7 @@ function drawConnectors(now, opacity = 1) {
 	if (connectorEdges.length === 0) return;
 
 	ctx.save();
-	ctx.strokeStyle = `rgba(151, 225, 255, ${0.085 * opacity})`;
+	ctx.strokeStyle = `rgba(151, 225, 255, ${0.055 * opacity})`;
 	ctx.lineWidth = 1;
 	for (const edge of connectorEdges) {
 		const from = players.get(edge.a);
@@ -576,16 +633,7 @@ function drawConnectors(now, opacity = 1) {
 
 	if (motionQuery.matches) return;
 
-	const elapsed = Math.max(0, now - countdownStartedAt);
-	for (const edge of connectorEdges) {
-		const from = players.get(edge.a);
-		const to = players.get(edge.b);
-		if (!from || !to) continue;
-		const length = Math.max(1, Math.hypot(to.x - from.x, to.y - from.y));
-		const basePhase = ((elapsed * 0.82 + edge.seed) % length) / length;
-		drawElectricPulse(from, to, basePhase, now, opacity, edge.seed);
-		drawElectricPulse(from, to, (basePhase + 0.52) % 1, now, opacity * 0.72, edge.seed + 41);
-	}
+	drawTravelingConnectorDot(now, opacity);
 }
 
 function easeOutQuint(value) {
@@ -770,6 +818,7 @@ function prepareNextRound() {
 	players.clear();
 	physicalPointers.clear();
 	connectorEdges = [];
+	connectorRoute = [];
 	countdownStartedAt = 0;
 	countdownDeadline = 0;
 	hapticMilestonesFired = 0;
@@ -778,6 +827,7 @@ function prepareNextRound() {
 	roundIdentityStyle = completedRounds % 2 === 0 ? "numbers" : "shapes";
 	body.dataset.identityStyle = roundIdentityStyle;
 	collectingPanel.dataset.connectorCount = "0";
+	collectingPanel.dataset.travelingDotCount = "0";
 	document.documentElement.style.setProperty("--accent", DEFAULT_ACCENT);
 	resetGesture();
 	setGameState("idle");

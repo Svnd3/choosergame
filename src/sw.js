@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "chooser-";
-const CACHE_NAME = `${CACHE_PREFIX}v10`;
+const CACHE_NAME = `${CACHE_PREFIX}v11`;
 const APP_BASE = new URL("./", self.location.href);
 const CACHE_PATHS = [
 	"./",
