@@ -1,13 +1,14 @@
 {
-	"name": "Player Chooser",
+	"name": "Chooser — Truth or Dare",
 	"short_name": "Chooser",
 	"categories": ["entertainment", "games", "social", "utilities"],
-	"description": "Choose a player",
+	"description": "An electric finger chooser with 1,000+ Truths and 1,000+ Dares.",
 	"lang": "en",
 	"display": "standalone",
-	"start_url": "/",
-	"background_color": "#000",
-	"theme_color": "#ff0739",
+	"start_url": "./",
+	"scope": "./",
+	"background_color": "#050608",
+	"theme_color": "#050608",
 	"icons": [
 		{
 			"src": "images/logo-48.png",

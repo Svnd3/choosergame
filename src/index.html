@@ -4,10 +4,14 @@
 		<meta charset="utf-8" />
 		<meta
 			name="viewport"
-			content="width=device-width, initial-scale=1, user-scalable=no"
+			content="width=device-width, initial-scale=1, viewport-fit=cover"
 		/>
-		<link rel="canonical" href="https://chooser.kuehle.me" />
-		<title>Player Chooser</title>
+		<meta
+			name="description"
+			content="A fast, electric finger chooser for Truth or Dare nights."
+		/>
+		<link rel="canonical" href="https://svnd3.github.io/choosergame/" />
+		<title>Chooser — Truth or Dare</title>
 		<link rel="manifest" href="manifest.webmanifest" />
 		<link rel="icon" sizes="48x48" href="images/logo-48.png" />
 		<link rel="icon" sizes="96x96" href="images/logo-96.png" />
@@ -19,24 +23,154 @@
 			name="apple-mobile-web-app-status-bar-style"
 			content="black-translucent"
 		/>
-		<meta name="theme-color" content="#ff0739" />
+		<meta name="theme-color" content="#050608" />
 		<link rel="stylesheet" href="index.css" />
 		<script type="module" src="index.js"></script>
 	</head>
-	<body>
-		<canvas id="board"></canvas>
-		<p id="description">
-			Make all players put one finger on the screen. After 2 seconds one
-			player is chosen at random.
-		</p>
-		<div
-			id="live-region"
-			aria-live="assertive"
-			class="visually-hidden"
-		></div>
-		<p id="version"></p>
+	<body data-game-state="idle" data-identity-style="numbers">
+		<canvas id="board" aria-hidden="true"></canvas>
+
+		<header class="topbar">
+			<p class="brand" aria-label="Chooser">chooser<span>.</span></p>
+			<button
+				id="settings-button"
+				class="icon-button"
+				type="button"
+				aria-label="Open game settings"
+			>
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M10 14v6" />
+				</svg>
+			</button>
+		</header>
+
+		<main id="game-ui">
+			<section id="idle-panel" class="state-panel" aria-labelledby="idle-title">
+				<h1 id="idle-title">Everyone in.</h1>
+				<p class="state-copy">
+					Hold one finger each.<br />We’ll choose in two seconds.
+				</p>
+				<p id="active-config" class="active-config">Mix · Neutral + Funny + Bold</p>
+				<p class="gesture-hint">Two-finger double-tap opens settings</p>
+			</section>
+
+			<section
+				id="collecting-panel"
+				class="state-panel collecting-panel"
+				aria-labelledby="countdown-label"
+				hidden
+			>
+				<p id="countdown-label" class="countdown-label">Hold steady</p>
+				<p id="player-count" class="player-count">One more finger</p>
+			</section>
+
+			<section
+				id="result-panel"
+				class="state-panel result-panel"
+				aria-labelledby="result-prompt"
+				hidden
+			>
+				<p id="result-meta" class="result-meta">Player 1 · Truth</p>
+				<h2 id="result-prompt">What is your most harmless secret?</h2>
+				<button id="next-round" class="next-round" type="button">
+					<span id="next-round-label">Next round</span>
+					<svg viewBox="0 0 24 24" aria-hidden="true">
+						<path d="M5 12h14M14 7l5 5-5 5" />
+					</svg>
+				</button>
+			</section>
+		</main>
+
+		<p id="version" aria-hidden="true"></p>
+		<div id="live-region" aria-live="assertive" class="visually-hidden"></div>
 		<p id="update-available" hidden>
-			Update available. <a href="">Reload</a> to apply.
+			A fresh version is ready. <a href="">Reload</a>
 		</p>
+
+		<dialog id="settings-dialog" aria-labelledby="settings-title">
+			<div class="settings-shell">
+				<header class="settings-header">
+					<div>
+						<h2 id="settings-title">Game setup</h2>
+						<p>Pick the mood. The room does the rest.</p>
+					</div>
+					<button
+						id="settings-close"
+						class="icon-button close-button"
+						type="button"
+						aria-label="Close game settings"
+					>
+						<svg viewBox="0 0 24 24" aria-hidden="true">
+							<path d="M6 6l12 12M18 6 6 18" />
+						</svg>
+					</button>
+				</header>
+
+				<fieldset class="settings-group mode-group">
+					<legend>Game</legend>
+					<div class="segmented-control">
+						<label>
+							<input type="radio" name="mode" value="truth" />
+							<span>Truth</span>
+						</label>
+						<label>
+							<input type="radio" name="mode" value="mix" checked />
+							<span>Mix</span>
+						</label>
+						<label>
+							<input type="radio" name="mode" value="dare" />
+							<span>Dare</span>
+						</label>
+					</div>
+				</fieldset>
+
+				<fieldset class="settings-group category-group">
+					<legend>Vibes</legend>
+					<div class="category-list">
+						<label class="category-option">
+							<span><strong>Neutral</strong><small>Easy and all-room safe</small></span>
+							<input type="checkbox" name="category" value="neutral" checked />
+						</label>
+						<label class="category-option">
+							<span><strong>Funny</strong><small>Ridiculous, never cruel</small></span>
+							<input type="checkbox" name="category" value="funny" checked />
+						</label>
+						<label class="category-option">
+							<span><strong>Deep</strong><small>Honest and reflective</small></span>
+							<input type="checkbox" name="category" value="deep" />
+						</label>
+						<label class="category-option">
+							<span><strong>Bold</strong><small>Brave, loud, high-energy</small></span>
+							<input type="checkbox" name="category" value="bold" checked />
+						</label>
+						<label class="category-option">
+							<span><strong>Couples</strong><small>Closeness and chemistry</small></span>
+							<input type="checkbox" name="category" value="couples" />
+						</label>
+						<label class="category-option adult-option">
+							<span><strong>Naughty <em>18+</em></strong><small>Flirty and consent-first</small></span>
+							<input type="checkbox" name="category" value="naughty" />
+						</label>
+					</div>
+				</fieldset>
+
+				<div class="settings-group haptics-row">
+					<span>
+						<strong>Haptics</strong>
+						<small>Subtle pulses and a winner beat</small>
+					</span>
+					<label class="switch">
+						<input id="haptics-toggle" type="checkbox" checked />
+						<span aria-hidden="true"></span>
+						<b class="visually-hidden">Enable vibration</b>
+					</label>
+				</div>
+
+				<footer class="settings-footer">
+					<p id="library-count">2,400+ prompts available offline</p>
+					<p>Naughty is for consenting adults. Anyone can skip any prompt.</p>
+				</footer>
+			</div>
+		</dialog>
 	</body>
 </html>
