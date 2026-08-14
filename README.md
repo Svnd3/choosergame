@@ -21,7 +21,7 @@ python3 -m http.server 8001 --directory src
 
 Then open `http://localhost:8001` on a touch-capable device. When a source file is added, changed, or removed, update the cache list and version in [sw.js](./src/sw.js).
 
-Pushes to `main` deploy the `src/` directory through GitHub Pages. The repository’s Pages source must be set to **GitHub Actions** once.
+Vercel publishes the `src/` directory at the site root using [vercel.json](./vercel.json). Once the GitHub repository is connected to Vercel, pushes to `main` deploy automatically.
 
 ## Safety
 
