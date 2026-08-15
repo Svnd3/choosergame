@@ -131,41 +131,78 @@
 					</button>
 				</header>
 
-				<div class="room-state" aria-live="polite">
-					<p id="room-status-line" class="room-status-line">Preparing connection…</p>
-					<div class="room-code-row">
-						<span>Room code</span>
-						<code id="room-code">— — — — — —</code>
-					</div>
-				</div>
-
-				<div class="room-actions">
-					<div class="room-share-actions">
-						<button id="room-share" class="room-action room-action-primary" type="button">
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path d="M12 16V4M7.5 8.5 12 4l4.5 4.5M5 13v6h14v-6" />
-							</svg>
-							<span>Share invite</span>
-						</button>
-						<button id="room-copy-link" class="room-action room-action-secondary" type="button">
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path d="M9.5 14.5 14.5 9M7.3 16.7l-1 1a3.5 3.5 0 0 1-5-5l3.1-3.1a3.5 3.5 0 0 1 5-.1M16.7 7.3l1-1a3.5 3.5 0 0 1 5 5l-3.1 3.1a3.5 3.5 0 0 1-5 .1" />
-							</svg>
-							<span>Copy link</span>
-						</button>
-					</div>
-					<button id="room-enter" class="room-action room-action-primary room-enter" type="button">
-						<span>Join room</span>
+				<div id="room-lobby" class="room-lobby">
+					<button id="room-create" class="room-action room-action-primary" type="button">
 						<svg viewBox="0 0 24 24" aria-hidden="true">
-							<path d="M5 12h14M14 7l5 5-5 5" />
+							<path d="M12 5v14M5 12h14" />
 						</svg>
+						<span>Create a room</span>
 					</button>
-					<button id="room-leave" class="room-leave" type="button">Leave room</button>
+
+					<p class="room-divider"><span>or join one</span></p>
+
+					<form id="room-join-form" class="room-join-form" novalidate>
+						<label for="room-code-input">Room code</label>
+						<div class="room-join-row">
+							<input
+								id="room-code-input"
+								class="room-code-input"
+								type="text"
+								autocomplete="one-time-code"
+								autocapitalize="characters"
+								enterkeyhint="go"
+								maxlength="14"
+								placeholder="ABCD-EFGH-JKMP"
+								spellcheck="false"
+								aria-describedby="room-code-error"
+							/>
+							<button id="room-code-submit" class="room-action room-action-secondary" type="submit">
+								Join room
+							</button>
+						</div>
+						<p id="room-code-error" class="room-code-error" aria-live="polite" hidden></p>
+					</form>
+
+					<p class="room-privacy">The room works while the host keeps it open.</p>
 				</div>
 
-				<p class="room-privacy">
-					This invite is private and expires when the host leaves.
-				</p>
+				<div id="room-session" class="room-session" hidden>
+					<div class="room-state" aria-live="polite">
+						<p id="room-status-line" class="room-status-line">Preparing connection…</p>
+						<div id="room-code-row" class="room-code-row">
+							<span>Room code</span>
+							<code id="room-code">— — — — — —</code>
+						</div>
+					</div>
+
+					<div class="room-actions">
+						<div class="room-share-actions">
+							<button id="room-share" class="room-action room-action-primary" type="button">
+								<svg viewBox="0 0 24 24" aria-hidden="true">
+									<path d="M12 16V4M7.5 8.5 12 4l4.5 4.5M5 13v6h14v-6" />
+								</svg>
+								<span>Share invite</span>
+							</button>
+							<button id="room-copy-link" class="room-action room-action-secondary" type="button">
+								<svg viewBox="0 0 24 24" aria-hidden="true">
+									<path d="M9.5 14.5 14.5 9M7.3 16.7l-1 1a3.5 3.5 0 0 1-5-5l3.1-3.1a3.5 3.5 0 0 1 5-.1M16.7 7.3l1-1a3.5 3.5 0 0 1 5 5l-3.1 3.1a3.5 3.5 0 0 1-5 .1" />
+								</svg>
+								<span>Copy link</span>
+							</button>
+						</div>
+						<button id="room-enter" class="room-action room-action-primary room-enter" type="button">
+							<span>Join room</span>
+							<svg viewBox="0 0 24 24" aria-hidden="true">
+								<path d="M5 12h14M14 7l5 5-5 5" />
+							</svg>
+						</button>
+						<button id="room-leave" class="room-leave" type="button">Leave room</button>
+					</div>
+
+					<p class="room-privacy">
+						This invite works while the host keeps the room open.
+					</p>
+				</div>
 			</div>
 		</dialog>
 

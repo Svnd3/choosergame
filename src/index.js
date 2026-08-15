@@ -8,12 +8,19 @@ import {
 	MAX_ROOM_PLAYERS,
 	ROOM_PROTOCOL_VERSION,
 	connectRoom,
+	createRoomCredentials,
 	createRoomSecret,
 	denormalizePoint,
+	deriveRoomSecret,
+	formatRoomCode,
 	makeRoomUrl,
+	normalizeRoomCode,
 	normalizePoint,
 	parseRoomHash,
+	roomUrlRequiresAuth,
 	sanitizeFingerIntent,
+	signRoomSnapshot,
+	verifyRoomSnapshot,
 } from "./room.js";
 
 const MIN_PLAYERS = 2;
@@ -28,7 +35,17 @@ const ROOM_STATE_BROADCAST_INTERVAL_MS = 40;
 const ROOM_JOIN_TIMEOUT_MS = 35000;
 const ROOM_SYNC_RETRY_DELAYS_MS = [0, 1200, 3000, 7000, 12000, 20000];
 const ROOM_HOST_RECONNECT_GRACE_MS = 5000;
+const ROOM_SYNC_RESPONSE_INTERVAL_MS = 750;
+const ROOM_CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 const SETTINGS_STORAGE_KEY = "chooser-game-settings-v3";
+const LEGACY_ROOM_PROMPT_CATEGORIES = new Set([
+	"neutral",
+	"funny",
+	"deep",
+	"couples",
+	"bold",
+	"naughty",
+]);
 const DEFAULT_ACCENT = "#ff315f";
 const PLAYER_HUES = [346, 192, 48, 268, 124, 24, 218, 305, 88, 164, 10, 240];
 const SHAPES = [
@@ -86,8 +103,16 @@ const roomClose = document.getElementById("room-close");
 const roomKicker = document.getElementById("room-kicker");
 const roomTitle = document.getElementById("room-title");
 const roomCopy = document.getElementById("room-copy");
+const roomLobby = document.getElementById("room-lobby");
+const roomSession = document.getElementById("room-session");
+const roomCreate = document.getElementById("room-create");
+const roomJoinForm = document.getElementById("room-join-form");
+const roomCodeInput = document.getElementById("room-code-input");
+const roomCodeSubmit = document.getElementById("room-code-submit");
+const roomCodeError = document.getElementById("room-code-error");
 const roomStatusLine = document.getElementById("room-status-line");
-const roomCode = document.getElementById("room-code");
+const roomCodeRow = document.getElementById("room-code-row");
+const roomCodeDisplay = document.getElementById("room-code");
 const roomShare = document.getElementById("room-share");
 const roomCopyLink = document.getElementById("room-copy-link");
 const roomEnter = document.getElementById("room-enter");
@@ -108,6 +133,7 @@ const roomOutgoingSequences = new Map();
 const roomLastMoveSentAt = new Map();
 const roomLastMoveReceivedAt = new Map();
 const roomPeerIds = new Set();
+const roomSyncLastRespondedAt = new Map();
 
 let gameState = "idle";
 let completedRounds = 0;
@@ -128,6 +154,12 @@ let localSettingsBeforeRoom = null;
 let roomMode = "local";
 let roomRole = "guest";
 let roomSecret = null;
+let activeRoomCode = null;
+let roomCredentials = null;
+let roomJoinChallenge = null;
+let roomAuthRequired = false;
+let roomAuthPending = false;
+let roomAuthEpoch = 0;
 let roomLink = "";
 let roomTransport = null;
 let roomHostPeerId = null;
@@ -141,6 +173,8 @@ let roomHostDepartureTimeout = null;
 let roomSnapshotBroadcastTimeout = null;
 let roomLastSnapshotBroadcastAt = 0;
 let updateReady = false;
+let roomLobbyBusy = false;
+let roomLobbyOperation = 0;
 const roomSyncRetryTimers = new Set();
 
 function loadSettings() {
@@ -216,7 +250,7 @@ function clearRoomConnectionTimers() {
 }
 
 function scheduleRoomSnapshotRequests(peerId, connectionAttempt) {
-	if (isRoomHost() || peerId !== roomHostPeerId) return;
+	if (isRoomHost() || (roomHostPeerId && peerId !== roomHostPeerId)) return;
 
 	for (const delay of ROOM_SYNC_RETRY_DELAYS_MS) {
 		const timer = window.setTimeout(() => {
@@ -225,11 +259,12 @@ function scheduleRoomSnapshotRequests(peerId, connectionAttempt) {
 				connectionAttempt !== roomConnectionAttempt ||
 				roomMode !== "joining" ||
 				!roomTransport ||
-				peerId !== roomHostPeerId
+				(roomHostPeerId && peerId !== roomHostPeerId)
 			) {
 				return;
 			}
-			roomTransport.sendSync(peerId).catch(() => {});
+			const syncData = roomJoinChallenge ? { challenge: roomJoinChallenge } : null;
+			roomTransport.sendSync(peerId, syncData).catch(() => {});
 		}, delay);
 		roomSyncRetryTimers.add(timer);
 	}
@@ -286,14 +321,56 @@ function updateRoomChrome() {
 	updateRoomDialog();
 }
 
+function setRoomCodeError(message = "") {
+	roomCodeError.textContent = message;
+	roomCodeError.hidden = message.length === 0;
+	roomCodeInput.setAttribute("aria-invalid", String(message.length > 0));
+}
+
+function setRoomLobbyBusy(isBusy) {
+	roomLobbyBusy = isBusy;
+	roomCreate.disabled = isBusy;
+	roomCodeInput.disabled = isBusy;
+	roomCodeSubmit.disabled = isBusy;
+}
+
+function cancelRoomLobbyOperation() {
+	roomLobbyOperation += 1;
+	setRoomLobbyBusy(false);
+}
+
+function roomWireCategories(categories) {
+	const wireCategories = new Set();
+	for (const category of categories) {
+		wireCategories.add(category);
+		if (category === "photos") wireCategories.add("neutral");
+	}
+	return [...wireCategories];
+}
+
+function toLocalRoomCategory(category) {
+	if (CATEGORIES[category]) return category;
+	if (CATEGORIES.photos && LEGACY_ROOM_PROMPT_CATEGORIES.has(category)) return "photos";
+	return null;
+}
+
 function updateRoomDialog() {
-	if (!roomSecret && roomMode === "local") return;
+	const showingLobby = roomMode === "local";
+	roomLobby.hidden = !showingLobby;
+	roomSession.hidden = showingLobby;
+	if (showingLobby) {
+		roomKicker.textContent = "Shared chooser";
+		roomTitle.textContent = "Play together.";
+		roomCopy.textContent = "Create a room, or enter the code from a friend.";
+		setRoomLobbyBusy(roomLobbyBusy);
+		return;
+	}
 
 	const total = Math.max(1, roomDeviceTotal());
 	const deviceLabel = `${total} device${total === 1 ? "" : "s"} connected`;
-	roomCode.textContent = roomSecret
-		? `Room ${roomSecret.slice(0, 4).toUpperCase()}`
-		: "Private room";
+	const formattedCode = activeRoomCode ? formatRoomCode(activeRoomCode) : null;
+	roomCodeRow.hidden = !formattedCode;
+	roomCodeDisplay.textContent = formattedCode ?? "";
 	roomShare.hidden = !isRoomHost() || roomMode !== "connected" || !roomLink;
 	roomCopyLink.hidden = !isRoomHost() || roomMode !== "connected" || !roomLink;
 	roomEnter.hidden = false;
@@ -319,7 +396,7 @@ function updateRoomDialog() {
 		roomKicker.textContent = "Your shared room";
 		roomTitle.textContent = roomMode === "joining" ? "Opening the room…" : "Room’s live.";
 		roomCopy.textContent =
-			"Send the invite. Everyone opens it, enters the board, and holds a finger.";
+			"Share the link or room code. Everyone joins, enters the board, and holds a finger.";
 		roomStatusLine.textContent = roomMode === "joining" ? "Connecting securely" : deviceLabel;
 		roomEnterLabel.textContent = "Go to the board";
 		return;
@@ -376,7 +453,9 @@ async function shareRoomInvite() {
 	try {
 		await navigator.share({
 			title: "Join my Chooser room",
-			text: "Open this link, then place a finger on your screen.",
+			text: activeRoomCode
+				? `Enter room code ${formatRoomCode(activeRoomCode)}, or open this link.`
+				: "Open this link, then place a finger on your screen.",
 			url: roomLink,
 		});
 	} catch (error) {
@@ -577,16 +656,19 @@ function serializeRoomPlayer(player) {
 
 function serializeRoomResult() {
 	if (!result) return null;
+	const prompt = result.prompt
+		? {
+				mode: result.prompt.mode,
+				category: result.prompt.category,
+				text: result.prompt.text,
+			}
+		: null;
 	return {
 		winner: serializeRoomPlayer(result.winner),
 		identityStyle: result.identityStyle,
-		prompt: result.prompt
-			? {
-					mode: result.prompt.mode,
-					category: result.prompt.category,
-					text: result.prompt.text,
-				}
-			: null,
+		// Legacy clients accept null; current clients read the additive promptV2 field.
+		prompt: null,
+		promptV2: prompt,
 	};
 }
 
@@ -597,6 +679,7 @@ function buildRoomSnapshot() {
 		kind: "snapshot",
 		sequence: ++roomStateSequence,
 		hostPeerId: roomTransport?.selfId ?? roomHostPeerId,
+		roomCode: activeRoomCode,
 		phase: gameState,
 		round: roomRound,
 		completedRounds,
@@ -610,14 +693,15 @@ function buildRoomSnapshot() {
 		settings: {
 			promptsEnabled: settings.promptsEnabled,
 			mode: settings.mode,
-			categories: [...settings.categories],
+			// Both names keep the immediately previous photo deck and older category deck compatible.
+			categories: roomWireCategories(settings.categories),
 			haptics: settings.haptics,
 		},
 		result: serializeRoomResult(),
 	};
 }
 
-function broadcastRoomSnapshot(target = null) {
+function broadcastRoomSnapshot(target = null, challenge = null) {
 	if (!isRoomConnected() || !isRoomHost()) return;
 	if (target === null) {
 		if (roomSnapshotBroadcastTimeout !== null) {
@@ -626,7 +710,26 @@ function broadcastRoomSnapshot(target = null) {
 		}
 		roomLastSnapshotBroadcastAt = performance.now();
 	}
-	roomTransport.sendState(buildRoomSnapshot(), target).catch((error) => {
+	const transport = roomTransport;
+	const connectionAttempt = roomConnectionAttempt;
+	const snapshot = buildRoomSnapshot();
+	if (target && challenge) {
+		snapshot.authChallenge = challenge;
+		snapshot.authTargetPeerId = target;
+	}
+	void (async () => {
+		const payload = roomCredentials
+			? await signRoomSnapshot(snapshot, roomCredentials)
+			: snapshot;
+		if (
+			connectionAttempt !== roomConnectionAttempt ||
+			transport !== roomTransport ||
+			!isRoomConnected()
+		) {
+			return;
+		}
+		await transport.sendState(payload, target);
+	})().catch((error) => {
 		console.warn("Room state could not be sent:", error);
 	});
 }
@@ -652,7 +755,13 @@ function sanitizeRoomSettings(value) {
 	if (!value || typeof value !== "object") return null;
 	const mode = ["truth", "dare", "mix"].includes(value.mode) ? value.mode : null;
 	const categories = Array.isArray(value.categories)
-		? [...new Set(value.categories)].filter((category) => CATEGORIES[category])
+		? [
+				...new Set(
+					value.categories
+						.map((category) => toLocalRoomCategory(category))
+						.filter(Boolean),
+				),
+			]
 		: [];
 	if (!mode || categories.length === 0) return null;
 	return {
@@ -699,11 +808,12 @@ function sanitizeRoomPlayer(value) {
 
 function sanitizeRoomPrompt(value) {
 	if (value === null) return null;
+	const category = toLocalRoomCategory(value?.category);
 	if (
 		!value ||
 		typeof value !== "object" ||
 		!["truth", "dare"].includes(value.mode) ||
-		!CATEGORIES[value.category] ||
+		!category ||
 		typeof value.text !== "string" ||
 		value.text.length < 1 ||
 		value.text.length > 500
@@ -712,7 +822,7 @@ function sanitizeRoomPrompt(value) {
 	}
 	return Object.freeze({
 		mode: value.mode,
-		category: value.category,
+		category,
 		text: value.text,
 	});
 }
@@ -721,7 +831,7 @@ function sanitizeRoomResult(value, roomPlayers) {
 	if (value === null) return null;
 	if (!value || typeof value !== "object") return undefined;
 	const winner = sanitizeRoomPlayer(value.winner);
-	const prompt = sanitizeRoomPrompt(value.prompt);
+	const prompt = sanitizeRoomPrompt(value.promptV2 ?? value.prompt);
 	const identityStyle = ["numbers", "shapes"].includes(value.identityStyle)
 		? value.identityStyle
 		: null;
@@ -731,7 +841,7 @@ function sanitizeRoomResult(value, roomPlayers) {
 	return { winner, identityStyle, prompt };
 }
 
-function applyRoomSnapshot(payload, peerId) {
+async function applyRoomSnapshot(payload, peerId, connectionAttempt = roomConnectionAttempt) {
 	if (
 		isRoomHost() ||
 		!payload ||
@@ -750,6 +860,56 @@ function applyRoomSnapshot(payload, peerId) {
 		payload.activeFingerIds.length > MAX_ROOM_PLAYERS
 	) {
 		return;
+	}
+	const snapshotRoomCode =
+		payload.roomCode == null ? null : normalizeRoomCode(payload.roomCode);
+	if (
+		(payload.roomCode != null && !snapshotRoomCode) ||
+		(activeRoomCode && snapshotRoomCode !== activeRoomCode)
+	) {
+		return;
+	}
+	let expectedCode = activeRoomCode;
+	if (roomAuthRequired) {
+		const authEpoch = roomAuthEpoch;
+		const authWasPending = roomAuthPending;
+		const expectedChallenge = roomJoinChallenge;
+		const hasTargetedAuth =
+			payload.authChallenge !== undefined || payload.authTargetPeerId !== undefined;
+		if (
+			authWasPending &&
+			(payload.authChallenge !== expectedChallenge ||
+				payload.authTargetPeerId !== roomTransport?.selfId)
+		) {
+			return;
+		}
+		if (!authWasPending && hasTargetedAuth) return;
+		if (!expectedCode) {
+			expectedCode = snapshotRoomCode;
+			if (!expectedCode) return;
+			const derivedSecret = await deriveRoomSecret(expectedCode);
+			if (
+				authEpoch !== roomAuthEpoch ||
+				roomAuthPending !== authWasPending ||
+				roomJoinChallenge !== expectedChallenge ||
+				derivedSecret !== roomSecret
+			) {
+				return;
+			}
+		}
+		if (!(await verifyRoomSnapshot(payload, expectedCode))) return;
+		if (
+			authEpoch !== roomAuthEpoch ||
+			roomAuthPending !== authWasPending ||
+			roomJoinChallenge !== expectedChallenge ||
+			connectionAttempt !== roomConnectionAttempt ||
+			!roomPeerIds.has(peerId) ||
+			(activeRoomCode && activeRoomCode !== expectedCode) ||
+			(roomHostPeerId && roomHostPeerId !== peerId) ||
+			payload.sequence <= lastAppliedRoomSequence
+		) {
+			return;
+		}
 	}
 
 	const nextPlayers = new Map();
@@ -774,7 +934,27 @@ function applyRoomSnapshot(payload, peerId) {
 	nextSettings.haptics = settings.haptics;
 
 	const previousPhase = gameState;
+	const discoveredHost = roomHostPeerId === null;
 	roomHostPeerId = peerId;
+	if (roomAuthRequired && roomAuthPending) roomAuthEpoch += 1;
+	roomAuthPending = false;
+	roomJoinChallenge = null;
+	if (!activeRoomCode && (expectedCode || snapshotRoomCode)) {
+		activeRoomCode = expectedCode || snapshotRoomCode;
+	}
+	if (roomHostDepartureTimeout !== null) {
+		window.clearTimeout(roomHostDepartureTimeout);
+		roomHostDepartureTimeout = null;
+	}
+	if (discoveredHost && roomSecret) {
+		roomLink = makeRoomUrl(
+			roomSecret,
+			peerId,
+			window.location.href,
+			roomAuthRequired,
+		);
+		replaceLocationWithRoom(roomSecret, peerId, roomAuthRequired);
+	}
 	lastAppliedRoomSequence = payload.sequence;
 	roomRound = Number.isInteger(payload.round) && payload.round >= 0 ? payload.round : roomRound;
 	completedRounds =
@@ -852,6 +1032,7 @@ function removePeerFingers(peerId) {
 
 function handleRoomPeerLeave(peerId, connectionAttempt) {
 	roomPeerIds.delete(peerId);
+	roomSyncLastRespondedAt.delete(peerId);
 	updateRoomChrome();
 
 	if (isRoomHost()) {
@@ -867,16 +1048,20 @@ function handleRoomPeerLeave(peerId, connectionAttempt) {
 		if (roomHostDepartureTimeout !== null) {
 			window.clearTimeout(roomHostDepartureTimeout);
 		}
+		if (roomAuthRequired) {
+			roomAuthEpoch += 1;
+			roomAuthPending = true;
+			roomJoinChallenge = createRoomSecret();
+		}
 		setRoomMode("joining", "Reconnecting to the room host.");
 		showRoomDialog();
 		roomHostDepartureTimeout = window.setTimeout(() => {
 			roomHostDepartureTimeout = null;
-			if (
-				connectionAttempt !== roomConnectionAttempt ||
-				roomPeerIds.has(roomHostPeerId)
-			) {
+			if (connectionAttempt !== roomConnectionAttempt) {
 				return;
 			}
+			if (!roomAuthRequired && roomPeerIds.has(roomHostPeerId)) return;
+			if (roomAuthRequired && !roomAuthPending) return;
 			roomConnectionAttempt += 1;
 			roomTransport?.leave();
 			roomTransport = null;
@@ -890,18 +1075,32 @@ function handleRoomPeerLeave(peerId, connectionAttempt) {
 	}
 }
 
-async function connectSharedRoom(secret, role, expectedHostId = null) {
+async function connectSharedRoom(
+	secret,
+	role,
+	expectedHostId = null,
+	code = null,
+	credentials = null,
+	authenticated = false,
+) {
 	const connectionAttempt = ++roomConnectionAttempt;
 	clearRoomConnectionTimers();
 	roomSecret = secret;
+	activeRoomCode = normalizeRoomCode(code);
+	roomCredentials = role === "host" ? credentials : null;
+	roomAuthRequired = role === "host" ? Boolean(credentials) : Boolean(authenticated || activeRoomCode);
+	roomAuthPending = role === "guest" && roomAuthRequired;
+	roomAuthEpoch += 1;
+	roomJoinChallenge = roomAuthPending ? createRoomSecret() : null;
 	roomRole = role;
 	roomHostPeerId = role === "guest" ? expectedHostId : null;
 	roomStateSequence = 0;
 	lastAppliedRoomSequence = 0;
 	roomPeerIds.clear();
+	roomSyncLastRespondedAt.clear();
 	roomLink =
 		role === "guest" && expectedHostId
-			? makeRoomUrl(secret, expectedHostId, window.location.href)
+			? makeRoomUrl(secret, expectedHostId, window.location.href, roomAuthRequired)
 			: "";
 	if (role === "guest" && !localSettingsBeforeRoom) {
 		localSettingsBeforeRoom = { ...settings, categories: [...settings.categories] };
@@ -916,7 +1115,11 @@ async function connectSharedRoom(secret, role, expectedHostId = null) {
 			onPeerJoin(peerId) {
 				if (connectionAttempt !== roomConnectionAttempt) return;
 				roomPeerIds.add(peerId);
-				if (peerId === roomHostPeerId && roomHostDepartureTimeout !== null) {
+				if (
+					!roomAuthRequired &&
+					peerId === roomHostPeerId &&
+					roomHostDepartureTimeout !== null
+				) {
 					window.clearTimeout(roomHostDepartureTimeout);
 					roomHostDepartureTimeout = null;
 				}
@@ -930,16 +1133,27 @@ async function connectSharedRoom(secret, role, expectedHostId = null) {
 				}
 			},
 			onState(payload, peerId) {
-				if (connectionAttempt === roomConnectionAttempt) applyRoomSnapshot(payload, peerId);
+				if (connectionAttempt !== roomConnectionAttempt) return;
+				void applyRoomSnapshot(payload, peerId, connectionAttempt).catch((error) => {
+					console.warn("Room state could not be verified:", error);
+				});
 			},
 			onIntent(payload, peerId) {
 				if (connectionAttempt !== roomConnectionAttempt || !isRoomHost()) return;
 				const intent = sanitizeFingerIntent(payload, peerId);
 				if (intent) handleRoomFingerIntent(intent, peerId);
 			},
-			onSync(peerId) {
+			onSync(payload, peerId) {
 				if (connectionAttempt === roomConnectionAttempt && isRoomHost()) {
-					broadcastRoomSnapshot(peerId);
+					const now = performance.now();
+					const lastResponse = roomSyncLastRespondedAt.get(peerId) ?? -Infinity;
+					if (now - lastResponse < ROOM_SYNC_RESPONSE_INTERVAL_MS) return;
+					roomSyncLastRespondedAt.set(peerId, now);
+					const challenge = ROOM_CHALLENGE_PATTERN.test(payload?.challenge)
+						? payload.challenge
+						: null;
+					if (payload !== null && !challenge) return;
+					broadcastRoomSnapshot(peerId, challenge);
 				}
 			},
 			onError(details) {
@@ -972,14 +1186,23 @@ async function connectSharedRoom(secret, role, expectedHostId = null) {
 		for (const peerId of transport.getPeerIds()) roomPeerIds.add(peerId);
 		if (isRoomHost()) {
 			roomHostPeerId = transport.selfId;
-			roomLink = makeRoomUrl(secret, transport.selfId, window.location.href);
-			replaceLocationWithRoom(secret, transport.selfId);
+			roomLink = makeRoomUrl(
+				secret,
+				transport.selfId,
+				window.location.href,
+				roomAuthRequired,
+			);
+			replaceLocationWithRoom(secret, transport.selfId, roomAuthRequired);
 			setRoomMode("connected");
 			broadcastRoomSnapshot();
 		} else {
 			startRoomJoinTimeout(connectionAttempt);
-			if (roomPeerIds.has(roomHostPeerId)) {
+			if (roomHostPeerId && roomPeerIds.has(roomHostPeerId)) {
 				scheduleRoomSnapshotRequests(roomHostPeerId, connectionAttempt);
+			} else {
+				for (const peerId of roomPeerIds) {
+					scheduleRoomSnapshotRequests(peerId, connectionAttempt);
+				}
 			}
 			updateRoomChrome();
 		}
@@ -996,16 +1219,83 @@ async function connectSharedRoom(secret, role, expectedHostId = null) {
 	}
 }
 
-function replaceLocationWithRoom(secret, hostId) {
-	const nextUrl = new URL(makeRoomUrl(secret, hostId, window.location.href));
+function replaceLocationWithRoom(secret, hostId, authenticated = false) {
+	const nextUrl = new URL(
+		makeRoomUrl(secret, hostId, window.location.href, authenticated),
+	);
 	history.replaceState(null, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
 }
 
-function createSharedRoom() {
+function normalizeRoomCodeDraft(value) {
+	return value
+		.toUpperCase()
+		.replace(/[IL]/g, "1")
+		.replace(/O/g, "0")
+		.replace(/[^0-9A-HJKMNP-TV-Z]/g, "")
+		.slice(0, 12);
+}
+
+function formatRoomCodeDraft(value) {
+	const compact = normalizeRoomCodeDraft(value);
+	return compact.match(/.{1,4}/g)?.join("-") ?? "";
+}
+
+function showRoomLobby() {
 	if (roomMode !== "local") return;
-	const secret = createRoomSecret();
-	prepareNextRound({ broadcast: false });
-	void connectSharedRoom(secret, "host");
+	setRoomCodeError();
+	setRoomLobbyBusy(false);
+	showRoomDialog();
+}
+
+async function createSharedRoom() {
+	if (roomMode !== "local" || roomLobbyBusy) return;
+	const operation = ++roomLobbyOperation;
+	setRoomCodeError();
+	setRoomLobbyBusy(true);
+	try {
+		const credentials = await createRoomCredentials();
+		if (operation !== roomLobbyOperation || roomMode !== "local" || !roomDialog.open) return;
+		prepareNextRound({ broadcast: false });
+		void connectSharedRoom(
+			credentials.secret,
+			"host",
+			null,
+			credentials.code,
+			credentials,
+		);
+	} catch (error) {
+		if (operation !== roomLobbyOperation || !roomDialog.open) return;
+		console.error("Room code could not be created:", error);
+		setRoomCodeError("A secure room code couldn’t be created on this device.");
+	} finally {
+		if (operation === roomLobbyOperation) setRoomLobbyBusy(false);
+	}
+}
+
+async function joinSharedRoomByCode(value) {
+	if (roomMode !== "local" || roomLobbyBusy) return;
+	const code = normalizeRoomCode(value);
+	if (!code) {
+		setRoomCodeError("Enter the complete 12-character room code.");
+		roomCodeInput.focus();
+		return;
+	}
+
+	const operation = ++roomLobbyOperation;
+	setRoomCodeError();
+	setRoomLobbyBusy(true);
+	try {
+		const secret = await deriveRoomSecret(code);
+		if (operation !== roomLobbyOperation || roomMode !== "local" || !roomDialog.open) return;
+		prepareNextRound({ broadcast: false });
+		void connectSharedRoom(secret, "guest", null, code);
+	} catch (error) {
+		if (operation !== roomLobbyOperation || !roomDialog.open) return;
+		console.error("Room code could not be opened:", error);
+		setRoomCodeError("This room code couldn’t be opened on this device.");
+	} finally {
+		if (operation === roomLobbyOperation) setRoomLobbyBusy(false);
+	}
 }
 
 function retrySharedRoom() {
@@ -1013,7 +1303,14 @@ function retrySharedRoom() {
 	const role = roomRole;
 	const expectedHostId = role === "guest" ? roomHostPeerId : null;
 	prepareNextRound({ broadcast: false });
-	void connectSharedRoom(roomSecret, role, expectedHostId);
+	void connectSharedRoom(
+		roomSecret,
+		role,
+		expectedHostId,
+		activeRoomCode,
+		role === "host" ? roomCredentials : null,
+		roomAuthRequired,
+	);
 }
 
 function restoreLocalSettings() {
@@ -1038,13 +1335,23 @@ function leaveSharedRoom() {
 	roomLastMoveReceivedAt.clear();
 	physicalPointers.clear();
 	roomSecret = null;
+	activeRoomCode = null;
+	roomCredentials = null;
+	roomJoinChallenge = null;
+	roomAuthRequired = false;
+	roomAuthPending = false;
+	roomAuthEpoch += 1;
+	roomSyncLastRespondedAt.clear();
 	roomLink = "";
 	roomHostPeerId = null;
 	roomRole = "guest";
 	roomStateSequence = 0;
 	lastAppliedRoomSequence = 0;
 	restoreLocalSettings();
-	history.replaceState(null, "", `${location.pathname}${location.search}`);
+	const localUrl = new URL(window.location.href);
+	localUrl.searchParams.delete("room-auth");
+	localUrl.hash = "";
+	history.replaceState(null, "", `${localUrl.pathname}${localUrl.search}`);
 	closeRoomDialog();
 	prepareNextRound({ broadcast: false });
 	setRoomMode("local");
@@ -1054,7 +1361,14 @@ function leaveSharedRoom() {
 function initializeRoomFromLocation() {
 	const invite = parseRoomHash(window.location.hash);
 	if (invite) {
-		void connectSharedRoom(invite.secret, "guest", invite.hostId);
+		void connectSharedRoom(
+			invite.secret,
+			"guest",
+			invite.hostId,
+			null,
+			null,
+			roomUrlRequiresAuth(window.location.href),
+		);
 		return;
 	}
 	if (window.location.hash.startsWith("#room=")) {
@@ -2113,7 +2427,23 @@ nextRoundButton.addEventListener("click", () => {
 	if (ready) prepareNextRound();
 });
 
-roomEntryButton.addEventListener("click", createSharedRoom);
+roomEntryButton.addEventListener("click", showRoomLobby);
+roomCreate.addEventListener("click", () => void createSharedRoom());
+roomJoinForm.addEventListener("submit", (event) => {
+	event.preventDefault();
+	void joinSharedRoomByCode(roomCodeInput.value);
+});
+roomCodeInput.addEventListener("input", () => {
+	const caret = roomCodeInput.selectionStart ?? roomCodeInput.value.length;
+	const charactersBeforeCaret = normalizeRoomCodeDraft(
+		roomCodeInput.value.slice(0, caret),
+	).length;
+	roomCodeInput.value = formatRoomCodeDraft(roomCodeInput.value);
+	const formattedCaret =
+		charactersBeforeCaret + Math.floor(Math.max(0, charactersBeforeCaret - 1) / 4);
+	roomCodeInput.setSelectionRange(formattedCaret, formattedCaret);
+	if (!roomCodeError.hidden) setRoomCodeError();
+});
 roomStatusButton.addEventListener("click", showRoomDialog);
 roomShare.addEventListener("click", () => void shareRoomInvite());
 roomCopyLink.addEventListener("click", () => void copyRoomInvite());
@@ -2124,12 +2454,18 @@ roomEnter.addEventListener("click", () => {
 roomLeave.addEventListener("click", leaveSharedRoom);
 roomClose.addEventListener("click", () => {
 	if (roomMode === "error" || roomMode === "joining") leaveSharedRoom();
-	else closeRoomDialog();
+	else {
+		if (roomMode === "local") cancelRoomLobbyOperation();
+		closeRoomDialog();
+	}
 });
 roomDialog.addEventListener("cancel", (event) => {
 	event.preventDefault();
 	if (roomMode === "error" || roomMode === "joining") leaveSharedRoom();
-	else closeRoomDialog();
+	else {
+		if (roomMode === "local") cancelRoomLobbyOperation();
+		closeRoomDialog();
+	}
 });
 
 updateLink.addEventListener("click", (event) => {

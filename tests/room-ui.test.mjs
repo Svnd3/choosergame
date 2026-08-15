@@ -18,17 +18,15 @@ test("shared-room badge renders only its numeric device count", () => {
 	);
 });
 
-test("shared-room card loads and applies the supplied display fonts", () => {
-	assert.match(styleSource, /font-family: "Bombing";/);
-	assert.match(styleSource, /url\("fonts\/bombing-regular\.ttf"\)/);
-	assert.match(styleSource, /url\("fonts\/papernotes-regular\.woff2"\)/);
-	assert.match(styleSource, /url\("fonts\/papernotes-bold\.woff2"\)/);
+test("shared-room card uses local system font fallbacks", () => {
+	assert.doesNotMatch(styleSource, /@font-face/);
+	assert.doesNotMatch(styleSource, /url\("fonts\//);
 	assert.match(
 		styleSource,
-		/\.room-header h2 \{[\s\S]*?font-family: "Bombing", Impact, sans-serif;/,
+		/\.room-header h2 \{[\s\S]*?font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;/,
 	);
 	assert.match(
 		styleSource,
-		/#room-dialog \{[\s\S]*?font-family: "Papernotes", "Segoe UI", sans-serif;/,
+		/#room-dialog \{[\s\S]*?font-family: ui-rounded, "Avenir Next", "Segoe UI", sans-serif;/,
 	);
 });

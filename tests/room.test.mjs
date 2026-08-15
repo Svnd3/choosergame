@@ -6,13 +6,21 @@ import test from "node:test";
 import {
 	MAX_ROOM_PLAYERS,
 	ROOM_PROTOCOL_VERSION,
+	createRoomCode,
+	createRoomCredentials,
 	createRoomSecret,
 	denormalizePoint,
+	deriveRoomSecret,
+	formatRoomCode,
 	isValidRoomSecret,
 	makeRoomUrl,
+	normalizeRoomCode,
 	normalizePoint,
 	parseRoomHash,
+	roomUrlRequiresAuth,
 	sanitizeFingerIntent,
+	signRoomSnapshot,
+	verifyRoomSnapshot,
 } from "../src/room.js";
 
 const VENDOR_BUNDLE_URL = new URL(
@@ -41,6 +49,57 @@ test("room secret validation rejects malformed values", () => {
 	assert.equal(isValidRoomSecret("a".repeat(21)), false);
 	assert.equal(isValidRoomSecret("a".repeat(23)), false);
 	assert.equal(isValidRoomSecret(`${"a".repeat(21)}+`), false);
+});
+
+test("room codes are random, normalized, and friend-readable", () => {
+	const codes = Array.from({ length: 128 }, createRoomCode);
+
+	for (const code of codes) {
+		assert.match(code, /^[0-9A-HJKMNP-TV-Z]{12}$/);
+		assert.equal(normalizeRoomCode(formatRoomCode(code)), code);
+		assert.match(formatRoomCode(code), /^[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4}){2}$/);
+	}
+	assert.equal(new Set(codes).size, codes.length);
+	assert.equal(normalizeRoomCode("o1il 2345-abcd"), "01112345ABCD");
+	assert.equal(normalizeRoomCode("too-short"), null);
+	assert.equal(normalizeRoomCode("ABCD-EFGH-UKLM"), null);
+	assert.equal(normalizeRoomCode(null), null);
+	assert.equal(formatRoomCode("not a code"), null);
+});
+
+test("room codes deterministically derive valid private room secrets", async () => {
+	const first = await deriveRoomSecret("ABCD-EFGH-JKMP");
+	const repeated = await deriveRoomSecret("abcd efgh jkmp");
+	const second = await deriveRoomSecret("ABCD-EFGH-JKMQ");
+
+	assert.equal(first, "Mlo1qF-iPwuXjD00quHUOw");
+	assert.equal(first, repeated);
+	assert.equal(isValidRoomSecret(first), true);
+	assert.notEqual(first, second);
+	await assert.rejects(() => deriveRoomSecret("incomplete"), TypeError);
+});
+
+test("room codes authenticate signed host snapshots", async () => {
+	const credentials = await createRoomCredentials();
+	const snapshot = {
+		version: ROOM_PROTOCOL_VERSION,
+		kind: "snapshot",
+		sequence: 1,
+		hostPeerId: "HostPeer0123456789Ab",
+		authChallenge: createRoomSecret(),
+		authTargetPeerId: "GuestPeer0123456789A",
+	};
+	const signed = await signRoomSnapshot(snapshot, credentials);
+
+	assert.match(credentials.code, /^[0-9A-HJKMNP-TV-Z]{12}$/);
+	assert.equal(isValidRoomSecret(credentials.secret), true);
+	assert.equal(await verifyRoomSnapshot(signed, credentials.code), true);
+	assert.equal(
+		await verifyRoomSnapshot({ ...signed, sequence: 2 }, credentials.code),
+		false,
+	);
+	assert.equal(await verifyRoomSnapshot(signed, createRoomCode()), false);
+	assert.equal(await verifyRoomSnapshot({ ...signed, authSig: "broken" }, credentials.code), false);
 });
 
 test("room hashes parse only the exact supported fragment", () => {
@@ -79,7 +138,15 @@ test("room URL generation preserves path and query while replacing the hash", ()
 	assert.equal(url.pathname, "/play/together");
 	assert.equal(url.search, "?theme=neon&sound=on");
 	assert.equal(url.hash, `#room=${secret}&host=${hostId}`);
+	assert.equal(roomUrlRequiresAuth(url), false);
 	assert.deepEqual(parseRoomHash(url.hash), { secret, hostId });
+
+	const authenticatedUrl = new URL(makeRoomUrl(secret, hostId, url, true));
+	assert.equal(authenticatedUrl.searchParams.get("room-auth"), "1");
+	assert.equal(roomUrlRequiresAuth(authenticatedUrl), true);
+	assert.equal(roomUrlRequiresAuth("not a URL"), false);
+	assert.equal(roomUrlRequiresAuth(null), false);
+	assert.equal(new URL(makeRoomUrl(secret, hostId, authenticatedUrl)).search, url.search);
 	assert.throws(() => makeRoomUrl("bad", hostId, result), TypeError);
 	assert.throws(() => makeRoomUrl(secret, "short", result), TypeError);
 	assert.throws(() => makeRoomUrl(secret, "Host-Peer0123456789A", result), TypeError);
@@ -185,7 +252,7 @@ test("vendored Trystero is the exact pinned ESM artifact", async () => {
 	assert.match(bundle.toString("utf8"), /Bundled license information/);
 });
 
-test("room transport loads locally with eight fixed relays and is cached by v18", async () => {
+test("room transport loads locally with eight fixed relays and is cached by v19", async () => {
 	const [roomSource, workerSource, vendorNote] = await Promise.all([
 		readFile(new URL("../src/room.js", import.meta.url), "utf8"),
 		readFile(new URL("../src/sw.js", import.meta.url), "utf8"),
@@ -201,12 +268,10 @@ test("room transport loads locally with eight fixed relays and is cached by v18"
 	assert.match(roomSource, /urls:\s*ROOM_RELAY_URLS/);
 	assert.doesNotMatch(roomSource, /communities\.nos\.social/);
 	assert.match(roomSource, /makeAction\(["']sync-v1["']\)/);
-	assert.match(roomSource, /sendSync\(target\)/);
-	assert.match(roomSource, /syncAction\.send\(null, \{ target \}\)/);
-	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v18`/);
-	assert.match(workerSource, /"fonts\/bombing-regular\.ttf"/);
-	assert.match(workerSource, /"fonts\/papernotes-regular\.woff2"/);
-	assert.match(workerSource, /"fonts\/papernotes-bold\.woff2"/);
+	assert.match(roomSource, /sendSync\(target, data = null\)/);
+	assert.match(roomSource, /handleSync\(data, metadata\.peerId\)/);
+	assert.match(roomSource, /syncAction\.send\(data, \{ target \}\)/);
+	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v19`/);
 	assert.match(workerSource, /"vendor\/trystero-nostr-0\.25\.3\.js"/);
 	assert.match(vendorNote, /59,959-byte ESM bundle/);
 	assert.match(
