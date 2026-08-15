@@ -1,6 +1,6 @@
-// Version 4 isolates numeric-code rendezvous and the opt-in adult deck from
-// older clients that cannot interpret either wire format safely.
-export const ROOM_PROTOCOL_VERSION = 4;
+// Version 5 lets code and game rooms reuse one authenticated peer connection.
+// Older clients use a different signaling namespace and cannot join by mistake.
+export const ROOM_PROTOCOL_VERSION = 5;
 export const MAX_ROOM_PLAYERS = 12;
 
 const ROOM_SECRET_BYTES = 16;
@@ -8,12 +8,12 @@ const ROOM_SECRET_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 const ROOM_CODE_MIN_LENGTH = 2;
 const ROOM_CODE_MAX_LENGTH = 4;
 const ROOM_CODE_PATTERN = /^[0-9]{2,4}$/;
-const ROOM_CODE_KDF_SALT = "choosergame.vercel.app/room-code/v4";
+const ROOM_CODE_KDF_SALT = "choosergame.vercel.app/room-code/v5";
 const ROOM_CODE_KDF_ITERATIONS = 150000;
-const ROOM_CODE_INVITE_KIND = "room-code-invite-v4";
-const ROOM_CODE_RESOLVE_KIND = "room-code-resolve-v4";
+const ROOM_CODE_INVITE_KIND = "room-code-invite-v5";
+const ROOM_CODE_RESOLVE_KIND = "room-code-resolve-v5";
 const ROOM_CODE_CLAIM_WAIT_MS = 2200;
-const ROOM_CODE_RESOLVE_WAIT_MS = 8000;
+const ROOM_CODE_RESOLVE_WAIT_MS = 15000;
 const ROOM_CODE_FOUR_DIGIT_ATTEMPTS = 6;
 const ROOM_AUTH_PUBLIC_KEY_BYTES = 65;
 const ROOM_AUTH_SIGNATURE_BYTES = 64;
@@ -29,7 +29,7 @@ const ROOM_RELAY_URLS = Object.freeze([
 	"wss://bucket.coracle.social",
 	"wss://basspistol.org",
 	"wss://nos.lol",
-	"wss://hornetstorage.net/relay",
+	"wss://nostr-relay.corb.net",
 	"wss://nostr-01.uid.ovh",
 	"wss://koru.bitcointxoko.org",
 ]);
@@ -488,19 +488,19 @@ export async function connectRoom({
 	);
 	const room = joinRoom(
 		{
-			appId: `choosergame.vercel.app/realtime/v4/${channel}`,
+			appId: "choosergame.vercel.app/realtime/v5",
 			password: secret,
 			relayConfig: {
 				urls: ROOM_RELAY_URLS,
 				warnOnRelayFailure: false,
 			},
 		},
-		`chooser-v4-${channel}-${secret}`,
+		`chooser-v5-${channel}-${secret}`,
 		{ onJoinError: handleError },
 	);
-	const stateAction = room.makeAction(`${channel}-state-v4`);
-	const intentAction = room.makeAction(`${channel}-intent-v4`);
-	const syncAction = room.makeAction(`${channel}-sync-v4`);
+	const stateAction = room.makeAction(`${channel}-state-v5`);
+	const intentAction = room.makeAction(`${channel}-intent-v5`);
+	const syncAction = room.makeAction(`${channel}-sync-v5`);
 
 	room.onPeerJoin = handlePeerJoin;
 	room.onPeerLeave = handlePeerLeave;
@@ -844,6 +844,7 @@ export async function resolveRoomCode(
 		verifySnapshot = verifyRoomSnapshot,
 		wait = waitForDelay,
 		timeoutMs = ROOM_CODE_RESOLVE_WAIT_MS,
+		keepAlive = false,
 	} = {},
 ) {
 	const normalizedCode = normalizeRoomCode(code);
@@ -859,6 +860,7 @@ export async function resolveRoomCode(
 	throwIfAborted(signal);
 	let transport = null;
 	let closed = false;
+	let retained = false;
 	let resolvedInvite = null;
 	let resolveInvite;
 	const invitePromise = new Promise((resolve) => {
@@ -908,17 +910,33 @@ export async function resolveRoomCode(
 		pendingRequests.clear();
 		for (const peerId of transportPeerIds(transport)) requestInvite(peerId);
 
-		const result = await Promise.race([
+		const raceResult = await Promise.race([
 			invitePromise,
 			Promise.resolve(wait(timeoutMs, signal)).then(() => null),
 		]);
-		if (result === null && pendingInviteChecks.size > 0) {
+		if (raceResult === null && pendingInviteChecks.size > 0) {
 			await Promise.all([...pendingInviteChecks]);
 		}
 		throwIfAborted(signal);
-		return resolvedInvite;
+		if (!resolvedInvite || !keepAlive) return resolvedInvite;
+
+		const release = () => {
+			if (closed) return undefined;
+			closed = true;
+			signal?.removeEventListener("abort", handleAbort);
+			return transport?.leave();
+		};
+		const handleAbort = () => {
+			void release();
+		};
+		const retainedInvite = Object.freeze({ ...resolvedInvite, release });
+		retained = true;
+		signal?.addEventListener("abort", handleAbort, { once: true });
+		return retainedInvite;
 	} finally {
-		closed = true;
-		transport?.leave();
+		if (!retained) {
+			closed = true;
+			transport?.leave();
+		}
 	}
 }

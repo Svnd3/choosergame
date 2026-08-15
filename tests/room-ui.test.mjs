@@ -70,3 +70,22 @@ test("shared rooms resynchronize after a mobile browser returns", () => {
 	assert.match(scriptSource, /window\.addEventListener\("pageshow",/);
 	assert.match(scriptSource, /window\.addEventListener\("online", resumeSharedRoomConnection\);/);
 });
+
+test("room-code joins reuse their live peer and never fail on a fixed timer", () => {
+	const slowJoinHandler = scriptSource.match(
+		/function startRoomJoinTimeout\(connectionAttempt\) \{[\s\S]*?\n\}\n\nfunction setRoomMode/,
+	)?.[0];
+
+	assert.ok(slowJoinHandler);
+	assert.doesNotMatch(scriptSource, /ROOM_JOIN_TIMEOUT_MS/);
+	assert.doesNotMatch(slowJoinHandler, /roomTransport\?\.leave|roomTransport = null/);
+	assert.doesNotMatch(slowJoinHandler, /setRoomMode\(\s*"error"/);
+	assert.match(slowJoinHandler, /Still connecting automatically/);
+	assert.match(slowJoinHandler, /startRoomJoinTimeout\(connectionAttempt\)/);
+	assert.match(scriptSource, /keepAlive: true/);
+	assert.match(scriptSource, /invite\.authKey,\s*invite,\s*\);/);
+	assert.match(
+		scriptSource,
+		/peerId === roomHostPeerId\)[\s\S]*?releaseRoomCodeRendezvous\(rendezvous\)/,
+	);
+});

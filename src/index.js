@@ -32,7 +32,7 @@ const ELECTRIC_DOT_SPEED = 1.15;
 const ROOM_MOVE_INTERVAL_MS = 40;
 const ROOM_RECEIVE_MOVE_INTERVAL_MS = 28;
 const ROOM_STATE_BROADCAST_INTERVAL_MS = 40;
-const ROOM_JOIN_TIMEOUT_MS = 35000;
+const ROOM_JOIN_SLOW_NOTICE_MS = 12000;
 const ROOM_SYNC_RETRY_DELAYS_MS = [0, 1200, 3000, 7000, 12000, 20000];
 const ROOM_SYNC_RESPONSE_INTERVAL_MS = 750;
 const ROOM_CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
@@ -160,6 +160,7 @@ let activeRoomCode = null;
 let roomCredentials = null;
 let roomExpectedAuthKey = null;
 let roomCodeClaim = null;
+let roomCodeRendezvous = null;
 let roomJoinChallenge = null;
 let roomAuthRequired = false;
 let roomAuthPending = false;
@@ -279,17 +280,17 @@ function startRoomJoinTimeout(connectionAttempt) {
 	roomJoinTimeout = window.setTimeout(() => {
 		roomJoinTimeout = null;
 		if (connectionAttempt !== roomConnectionAttempt || roomMode === "connected") return;
-		roomConnectionAttempt += 1;
-		clearRoomConnectionTimers();
-		roomTransport?.leave();
-		roomTransport = null;
-		roomPeerIds.clear();
 		setRoomMode(
-			"error",
-			"We couldn’t connect to the host. Keep their room open, then try again or switch between Wi-Fi and mobile data.",
+			"joining",
+			"Still connecting automatically. Keep both room pages open while we retry.",
 		);
+		if (roomTransport && roomHostPeerId && roomPeerIds.has(roomHostPeerId)) {
+			const syncData = roomJoinChallenge ? { challenge: roomJoinChallenge } : null;
+			roomTransport.sendSync(roomHostPeerId, syncData).catch(() => {});
+		}
 		showRoomDialog();
-	}, ROOM_JOIN_TIMEOUT_MS);
+		startRoomJoinTimeout(connectionAttempt);
+	}, ROOM_JOIN_SLOW_NOTICE_MS);
 }
 
 function setRoomMode(nextMode, statusMessage = "") {
@@ -358,6 +359,12 @@ async function leaveRoomCodeClaim(claim) {
 	} catch (error) {
 		console.warn("Room code claim could not be released:", error);
 	}
+}
+
+function releaseRoomCodeRendezvous(rendezvous = roomCodeRendezvous) {
+	if (!rendezvous || rendezvous !== roomCodeRendezvous) return;
+	roomCodeRendezvous = null;
+	void leaveRoomCodeClaim(rendezvous);
 }
 
 function roomWireCategories(categories) {
@@ -1084,9 +1091,12 @@ async function connectSharedRoom(
 	credentials = null,
 	authenticated = false,
 	expectedAuthKey = null,
+	rendezvous = null,
 ) {
 	const connectionAttempt = ++roomConnectionAttempt;
 	clearRoomConnectionTimers();
+	if (roomCodeRendezvous !== rendezvous) releaseRoomCodeRendezvous();
+	roomCodeRendezvous = role === "guest" ? rendezvous : null;
 	roomSecret = secret;
 	activeRoomCode = normalizeRoomCode(code);
 	roomCredentials = role === "host" ? credentials : null;
@@ -1119,6 +1129,9 @@ async function connectSharedRoom(
 			onPeerJoin(peerId) {
 				if (connectionAttempt !== roomConnectionAttempt) return;
 				roomPeerIds.add(peerId);
+				if (!isRoomHost() && peerId === roomHostPeerId) {
+					releaseRoomCodeRendezvous(rendezvous);
+				}
 				updateRoomChrome();
 				if (isRoomHost()) window.queueMicrotask(() => broadcastRoomSnapshot(peerId));
 				else scheduleRoomSnapshotRequests(peerId, connectionAttempt);
@@ -1175,6 +1188,7 @@ async function connectSharedRoom(
 			["local", "error"].includes(roomMode)
 		) {
 			transport.leave();
+			releaseRoomCodeRendezvous(rendezvous);
 			return;
 		}
 
@@ -1194,6 +1208,7 @@ async function connectSharedRoom(
 		} else {
 			startRoomJoinTimeout(connectionAttempt);
 			if (roomHostPeerId && roomPeerIds.has(roomHostPeerId)) {
+				releaseRoomCodeRendezvous(rendezvous);
 				scheduleRoomSnapshotRequests(roomHostPeerId, connectionAttempt);
 			} else {
 				for (const peerId of roomPeerIds) {
@@ -1203,8 +1218,12 @@ async function connectSharedRoom(
 			updateRoomChrome();
 		}
 	} catch (error) {
-		if (connectionAttempt !== roomConnectionAttempt) return;
+		if (connectionAttempt !== roomConnectionAttempt) {
+			releaseRoomCodeRendezvous(rendezvous);
+			return;
+		}
 		console.error("Shared room could not start:", error);
+		releaseRoomCodeRendezvous(rendezvous);
 		roomConnectionAttempt += 1;
 		clearRoomConnectionTimers();
 		setRoomMode(
@@ -1288,8 +1307,13 @@ async function joinSharedRoomByCode(value) {
 	roomLobbyAbortController = abortController;
 	setRoomCodeError();
 	setRoomLobbyBusy(true);
+	let invite = null;
+	let inviteAdopted = false;
 	try {
-		const invite = await resolveRoomCode(code, { signal: abortController.signal });
+		invite = await resolveRoomCode(code, {
+			signal: abortController.signal,
+			keepAlive: true,
+		});
 		if (operation !== roomLobbyOperation || roomMode !== "local" || !roomDialog.open) return;
 		if (!invite) {
 			setRoomCodeError("That room code isn’t active. Check the code and try again.");
@@ -1305,13 +1329,16 @@ async function joinSharedRoomByCode(value) {
 			null,
 			true,
 			invite.authKey,
+			invite,
 		);
+		inviteAdopted = true;
 	} catch (error) {
 		if (error?.name === "AbortError") return;
 		if (operation !== roomLobbyOperation || !roomDialog.open) return;
 		console.error("Room code could not be opened:", error);
 		setRoomCodeError("This room code couldn’t be opened on this device.");
 	} finally {
+		if (!inviteAdopted) await leaveRoomCodeClaim(invite);
 		if (roomLobbyAbortController === abortController) roomLobbyAbortController = null;
 		if (operation === roomLobbyOperation) setRoomLobbyBusy(false);
 	}
@@ -1388,9 +1415,12 @@ function restoreLocalSettings() {
 function leaveSharedRoom() {
 	cancelRoomLobbyOperation();
 	const codeClaim = roomCodeClaim;
+	const codeRendezvous = roomCodeRendezvous;
 	roomCodeClaim = null;
+	roomCodeRendezvous = null;
 	if (roomMode === "local") {
 		void leaveRoomCodeClaim(codeClaim);
+		void leaveRoomCodeClaim(codeRendezvous);
 		return;
 	}
 	roomConnectionAttempt += 1;
@@ -1398,6 +1428,7 @@ function leaveSharedRoom() {
 	roomTransport?.leave();
 	roomTransport = null;
 	void leaveRoomCodeClaim(codeClaim);
+	void leaveRoomCodeClaim(codeRendezvous);
 	roomPeerIds.clear();
 	localRoomFingerIds.clear();
 	roomActiveFingerIds.clear();

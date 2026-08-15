@@ -32,7 +32,7 @@ const VENDOR_BUNDLE_URL = new URL(
 );
 
 test("room protocol isolates clients without numeric-code or Naughty Mode support", () => {
-	assert.equal(ROOM_PROTOCOL_VERSION, 4);
+	assert.equal(ROOM_PROTOCOL_VERSION, 5);
 	assert.equal(MAX_ROOM_PLAYERS, 12);
 });
 
@@ -95,7 +95,7 @@ test("room-code rendezvous secrets are deterministic and length-sensitive", asyn
 	const repeated = await deriveRoomSecret("00");
 	const variants = await Promise.all(["000", "0000", "42", "042", "0042"].map(deriveRoomSecret));
 
-	assert.equal(first, "_3-P3PAoJXDGlhfO50BOLQ");
+	assert.equal(first, "GhPABEiaIsznvmkHjxdJ0g");
 	assert.equal(first, repeated);
 	assert.equal(isValidRoomSecret(first), true);
 	assert.equal(new Set([first, ...variants]).size, variants.length + 1);
@@ -233,7 +233,7 @@ test("room-code resolution accepts a verified signed host invite", async () => {
 	let derivedCode = null;
 	const invite = {
 		version: ROOM_PROTOCOL_VERSION,
-		kind: "room-code-invite-v4",
+		kind: "room-code-invite-v5",
 		code,
 		secret,
 		hostId,
@@ -269,10 +269,61 @@ test("room-code resolution accepts a verified signed host invite", async () => {
 	assert.equal(Object.isFrozen(result), true);
 	assert.equal(derivedCode, code);
 	assert.equal(request.target, hostId);
-	assert.equal(request.payload.kind, "room-code-resolve-v4");
+	assert.equal(request.payload.kind, "room-code-resolve-v5");
 	assert.equal(request.payload.code, code);
 	assert.equal(left, true);
 	await assert.rejects(() => resolveRoomCode("7"), TypeError);
+});
+
+test("room-code resolution retains one live peer until the game room attaches", async () => {
+	const code = "42";
+	const hostId = "HostPeer0123456789Ab";
+	const secret = createRoomSecret();
+	const invite = {
+		version: ROOM_PROTOCOL_VERSION,
+		kind: "room-code-invite-v5",
+		code,
+		secret,
+		hostId,
+		authKey: "test-public-key",
+		authSig: "test-signature",
+	};
+	const openRetainedInvite = async (signal, onLeave) =>
+		resolveRoomCode(code, {
+			signal,
+			keepAlive: true,
+			connect: async (options) => ({
+				selfId: "GuestPeer0123456789A",
+				getPeerIds: () => [hostId],
+				sendState: async () => {},
+				async sendSync() {
+					options.onState(invite, hostId);
+				},
+				leave: onLeave,
+			}),
+			deriveSecret: async () => createRoomSecret(),
+			verifySnapshot: async () => true,
+			wait: () => new Promise(() => {}),
+		});
+
+	let explicitLeaves = 0;
+	const retained = await openRetainedInvite(undefined, () => {
+		explicitLeaves += 1;
+	});
+	assert.equal(typeof retained.release, "function");
+	assert.equal(Object.isFrozen(retained), true);
+	assert.equal(explicitLeaves, 0);
+	await retained.release();
+	await retained.release();
+	assert.equal(explicitLeaves, 1);
+
+	let abortedLeaves = 0;
+	const controller = new AbortController();
+	await openRetainedInvite(controller.signal, () => {
+		abortedLeaves += 1;
+	});
+	controller.abort();
+	assert.equal(abortedLeaves, 1);
 });
 
 test("room hashes parse only the exact supported fragment", () => {
@@ -425,7 +476,7 @@ test("vendored Trystero is the exact pinned ESM artifact", async () => {
 	assert.match(bundle.toString("utf8"), /Bundled license information/);
 });
 
-test("room transport isolates v4 game/code channels and is cached by v25", async () => {
+test("room transport shares v5 peers across game/code channels and is cached by v26", async () => {
 	const [roomSource, workerSource, vendorNote] = await Promise.all([
 		readFile(new URL("../src/room.js", import.meta.url), "utf8"),
 		readFile(new URL("../src/sw.js", import.meta.url), "utf8"),
@@ -440,15 +491,18 @@ test("room transport isolates v4 game/code channels and is cached by v25", async
 	assert.equal(roomSource.match(/"wss:\/\//g)?.length, 8);
 	assert.match(roomSource, /urls:\s*ROOM_RELAY_URLS/);
 	assert.doesNotMatch(roomSource, /communities\.nos\.social/);
-	assert.match(roomSource, /appId:\s*`choosergame\.vercel\.app\/realtime\/v4\/\$\{channel\}`/);
-	assert.match(roomSource, /`chooser-v4-\$\{channel\}-\$\{secret\}`/);
-	assert.match(roomSource, /makeAction\(`\$\{channel\}-state-v4`\)/);
-	assert.match(roomSource, /makeAction\(`\$\{channel\}-intent-v4`\)/);
-	assert.match(roomSource, /makeAction\(`\$\{channel\}-sync-v4`\)/);
+	assert.doesNotMatch(roomSource, /hornetstorage\.net/);
+	assert.match(roomSource, /nostr-relay\.corb\.net/);
+	assert.match(roomSource, /ROOM_CODE_RESOLVE_WAIT_MS = 15000/);
+	assert.match(roomSource, /appId:\s*"choosergame\.vercel\.app\/realtime\/v5"/);
+	assert.match(roomSource, /`chooser-v5-\$\{channel\}-\$\{secret\}`/);
+	assert.match(roomSource, /makeAction\(`\$\{channel\}-state-v5`\)/);
+	assert.match(roomSource, /makeAction\(`\$\{channel\}-intent-v5`\)/);
+	assert.match(roomSource, /makeAction\(`\$\{channel\}-sync-v5`\)/);
 	assert.match(roomSource, /sendSync\(target, data = null\)/);
 	assert.match(roomSource, /handleSync\(data, metadata\.peerId\)/);
 	assert.match(roomSource, /syncAction\.send\(data, \{ target \}\)/);
-	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v25`/);
+	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v26`/);
 	assert.match(workerSource, /"vendor\/trystero-nostr-0\.25\.3\.js"/);
 	assert.match(workerSource, /"fonts\/nok\.otf"/);
 	assert.match(vendorNote, /59,959-byte ESM bundle/);
