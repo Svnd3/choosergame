@@ -35,11 +35,17 @@ test("the library contains only the deduplicated supplied-photo deck", () => {
 
 test("truths, dares, ids, and text are unique", () => {
 	const prompts = [...TRUTH_PROMPTS, ...DARE_PROMPTS];
+	const appendedConsentWording =
+		/clear consent is required|answer only if comfortable|passing is always okay|anyone may pass/i;
 
 	assert.equal(new Set(prompts.map((prompt) => prompt.id)).size, prompts.length);
 	assert.equal(new Set(TRUTH_PROMPTS.map((prompt) => prompt.text)).size, 68);
 	assert.equal(new Set(DARE_PROMPTS.map((prompt) => prompt.text)).size, 51);
 	assert.ok(prompts.every((prompt) => prompt.category === "photos"));
+	assert.ok(prompts.every((prompt) => !("requiresConsentReminder" in prompt)));
+	assert.ok(prompts.every((prompt) => !("minimumAge" in prompt)));
+	assert.ok(prompts.every((prompt) => !("contentRating" in prompt)));
+	assert.ok(prompts.every((prompt) => !appendedConsentWording.test(prompt.text)));
 });
 
 test("both requested go-home dares are present verbatim", () => {

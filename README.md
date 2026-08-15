@@ -37,7 +37,3 @@ node --test tests/*.test.mjs
 ```
 
 Vercel publishes the `src/` directory at the site root using [vercel.json](./vercel.json). Once the GitHub repository is connected to Vercel, pushes to `main` deploy automatically.
-
-## Safety
-
-Some supplied prompts are mature or involve other people. Every player can skip any prompt, and everyone involved should agree before a dare is performed.
