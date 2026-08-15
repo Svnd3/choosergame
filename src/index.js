@@ -13,6 +13,7 @@ import {
 	denormalizePoint,
 	deriveRoomSecret,
 	formatRoomCode,
+	getRoomResumeAction,
 	makeRoomUrl,
 	normalizeRoomCode,
 	normalizePoint,
@@ -34,7 +35,6 @@ const ROOM_RECEIVE_MOVE_INTERVAL_MS = 28;
 const ROOM_STATE_BROADCAST_INTERVAL_MS = 40;
 const ROOM_JOIN_TIMEOUT_MS = 35000;
 const ROOM_SYNC_RETRY_DELAYS_MS = [0, 1200, 3000, 7000, 12000, 20000];
-const ROOM_HOST_RECONNECT_GRACE_MS = 5000;
 const ROOM_SYNC_RESPONSE_INTERVAL_MS = 750;
 const ROOM_CHALLENGE_PATTERN = /^[A-Za-z0-9_-]{22}$/;
 const SETTINGS_STORAGE_KEY = "chooser-game-settings-v3";
@@ -172,12 +172,12 @@ let roomRound = 0;
 let roomStatusMessage = "";
 let roomConnectionAttempt = 0;
 let roomJoinTimeout = null;
-let roomHostDepartureTimeout = null;
 let roomSnapshotBroadcastTimeout = null;
 let roomLastSnapshotBroadcastAt = 0;
 let updateReady = false;
 let roomLobbyBusy = false;
 let roomLobbyOperation = 0;
+let roomDialogOpenedForReconnect = false;
 const roomSyncRetryTimers = new Set();
 
 function loadSettings() {
@@ -241,12 +241,10 @@ function roomDeviceTotal() {
 
 function clearRoomConnectionTimers() {
 	if (roomJoinTimeout !== null) window.clearTimeout(roomJoinTimeout);
-	if (roomHostDepartureTimeout !== null) window.clearTimeout(roomHostDepartureTimeout);
 	if (roomSnapshotBroadcastTimeout !== null) {
 		window.clearTimeout(roomSnapshotBroadcastTimeout);
 	}
 	roomJoinTimeout = null;
-	roomHostDepartureTimeout = null;
 	roomSnapshotBroadcastTimeout = null;
 	for (const timer of roomSyncRetryTimers) window.clearTimeout(timer);
 	roomSyncRetryTimers.clear();
@@ -426,6 +424,11 @@ function closeRoomDialog() {
 	if (!roomDialog.open) return;
 	if (typeof roomDialog.close === "function") roomDialog.close();
 	else roomDialog.removeAttribute("open");
+}
+
+function showRoomReconnectDialog() {
+	if (!roomDialog.open) roomDialogOpenedForReconnect = true;
+	showRoomDialog();
 }
 
 async function copyRoomInvite() {
@@ -945,10 +948,6 @@ async function applyRoomSnapshot(payload, peerId, connectionAttempt = roomConnec
 	if (!activeRoomCode && (expectedCode || snapshotRoomCode)) {
 		activeRoomCode = expectedCode || snapshotRoomCode;
 	}
-	if (roomHostDepartureTimeout !== null) {
-		window.clearTimeout(roomHostDepartureTimeout);
-		roomHostDepartureTimeout = null;
-	}
 	if (discoveredHost && roomSecret) {
 		roomLink = makeRoomUrl(
 			roomSecret,
@@ -1007,6 +1006,10 @@ async function applyRoomSnapshot(payload, peerId, connectionAttempt = roomConnec
 	updateSettingsSummary();
 	updateNextRoundAvailability();
 	setRoomMode("connected");
+	if (roomDialogOpenedForReconnect) {
+		roomDialogOpenedForReconnect = false;
+		closeRoomDialog();
+	}
 	requestRender();
 
 	if (previousPhase !== "reveal" && payload.phase === "reveal" && result) {
@@ -1033,7 +1036,7 @@ function removePeerFingers(peerId) {
 	return changed;
 }
 
-function handleRoomPeerLeave(peerId, connectionAttempt) {
+function handleRoomPeerLeave(peerId) {
 	roomPeerIds.delete(peerId);
 	roomSyncLastRespondedAt.delete(peerId);
 	updateRoomChrome();
@@ -1048,33 +1051,13 @@ function handleRoomPeerLeave(peerId, connectionAttempt) {
 	}
 
 	if (peerId === roomHostPeerId) {
-		if (roomHostDepartureTimeout !== null) {
-			window.clearTimeout(roomHostDepartureTimeout);
-		}
 		if (roomAuthRequired) {
 			roomAuthEpoch += 1;
 			roomAuthPending = true;
 			roomJoinChallenge = createRoomSecret();
 		}
 		setRoomMode("joining", "Reconnecting to the room host.");
-		showRoomDialog();
-		roomHostDepartureTimeout = window.setTimeout(() => {
-			roomHostDepartureTimeout = null;
-			if (connectionAttempt !== roomConnectionAttempt) {
-				return;
-			}
-			if (!roomAuthRequired && roomPeerIds.has(roomHostPeerId)) return;
-			if (roomAuthRequired && !roomAuthPending) return;
-			roomConnectionAttempt += 1;
-			roomTransport?.leave();
-			roomTransport = null;
-			roomPeerIds.clear();
-			setRoomMode(
-				"error",
-				"The link creator closed the room. Return to local play and start a fresh one.",
-			);
-			showRoomDialog();
-		}, ROOM_HOST_RECONNECT_GRACE_MS);
+		showRoomReconnectDialog();
 	}
 }
 
@@ -1118,21 +1101,13 @@ async function connectSharedRoom(
 			onPeerJoin(peerId) {
 				if (connectionAttempt !== roomConnectionAttempt) return;
 				roomPeerIds.add(peerId);
-				if (
-					!roomAuthRequired &&
-					peerId === roomHostPeerId &&
-					roomHostDepartureTimeout !== null
-				) {
-					window.clearTimeout(roomHostDepartureTimeout);
-					roomHostDepartureTimeout = null;
-				}
 				updateRoomChrome();
 				if (isRoomHost()) window.queueMicrotask(() => broadcastRoomSnapshot(peerId));
 				else scheduleRoomSnapshotRequests(peerId, connectionAttempt);
 			},
 			onPeerLeave(peerId) {
 				if (connectionAttempt === roomConnectionAttempt) {
-					handleRoomPeerLeave(peerId, connectionAttempt);
+					handleRoomPeerLeave(peerId);
 				}
 			},
 			onState(payload, peerId) {
@@ -1315,6 +1290,51 @@ function retrySharedRoom() {
 	);
 }
 
+function resumeSharedRoomConnection() {
+	const hostPeerId = roomHostPeerId;
+	const action = getRoomResumeAction({
+		hidden: document.hidden,
+		roomMode,
+		roomRole,
+		hasSecret: Boolean(roomSecret),
+		hasTransport: Boolean(roomTransport),
+		hasHostPeer: Boolean(hostPeerId && roomPeerIds.has(hostPeerId)),
+	});
+
+	if (action === "broadcast") {
+		broadcastRoomSnapshot();
+		return;
+	}
+	if (action === "wait") {
+		setRoomMode("joining", "Reconnecting to the room host.");
+		showRoomReconnectDialog();
+		return;
+	}
+	if (action !== "sync" || !hostPeerId || !roomTransport) return;
+
+	if (roomMode === "joining") {
+		scheduleRoomSnapshotRequests(hostPeerId, roomConnectionAttempt);
+		return;
+	}
+
+	const transport = roomTransport;
+	const connectionAttempt = roomConnectionAttempt;
+	const syncData = roomJoinChallenge ? { challenge: roomJoinChallenge } : null;
+	transport.sendSync(hostPeerId, syncData).catch(() => {
+		if (
+			document.hidden ||
+			connectionAttempt !== roomConnectionAttempt ||
+			transport !== roomTransport ||
+			roomMode === "local"
+		) {
+			return;
+		}
+		setRoomMode("joining", "Reconnecting to the room host.");
+		showRoomReconnectDialog();
+		scheduleRoomSnapshotRequests(hostPeerId, connectionAttempt);
+	});
+}
+
 function restoreLocalSettings() {
 	if (!localSettingsBeforeRoom) return;
 	settings = localSettingsBeforeRoom;
@@ -1347,6 +1367,7 @@ function leaveSharedRoom() {
 	roomLink = "";
 	roomHostPeerId = null;
 	roomRole = "guest";
+	roomDialogOpenedForReconnect = false;
 	roomStateSequence = 0;
 	lastAppliedRoomSequence = 0;
 	restoreLocalSettings();
@@ -2519,7 +2540,12 @@ window.addEventListener("blur", clearInterruptedRound);
 window.addEventListener("hashchange", () => window.location.reload());
 document.addEventListener("visibilitychange", () => {
 	if (document.hidden) clearInterruptedRound();
+	else resumeSharedRoomConnection();
 });
+window.addEventListener("pageshow", (event) => {
+	if (event.persisted) resumeSharedRoomConnection();
+});
+window.addEventListener("online", resumeSharedRoomConnection);
 motionQuery.addEventListener?.("change", requestRender);
 
 syncSettingsControls();

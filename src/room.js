@@ -174,6 +174,19 @@ export function normalizeRoomCode(value) {
 	return ROOM_CODE_PATTERN.test(normalized) ? normalized : null;
 }
 
+export function getRoomResumeAction({
+	hidden,
+	roomMode,
+	roomRole,
+	hasSecret,
+	hasTransport,
+	hasHostPeer,
+} = {}) {
+	if (hidden || roomMode === "local" || !hasSecret || !hasTransport) return null;
+	if (roomRole === "host") return "broadcast";
+	return hasHostPeer ? "sync" : "wait";
+}
+
 export function formatRoomCode(value) {
 	const normalized = normalizeRoomCode(value);
 	if (!normalized) return null;

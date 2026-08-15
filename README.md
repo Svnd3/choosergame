@@ -18,7 +18,7 @@ An offline-first finger picker for one screen, with live rooms for friends on se
 
 Tap **Play across phones**, then create a room and share either its link or 6-character code. Friends can paste the link or type the code in the same panel. Codes are tied to the creator's signing key so guests can verify the room host. The derived room key stays in the URL fragment, so it is not sent to the web server. A 6-character code has 30 bits of entropy and favors convenience over high-security access, so shared rooms are best for casual, short-lived play. Shared play uses encrypted peer-to-peer WebRTC connections and requires an internet connection; local play remains fully offline.
 
-The room creator coordinates each round and must keep the page open. Rooms are designed for small friend groups (up to 12 fingers). Public signaling relays and peer-to-peer networking can be blocked by strict corporate or mobile networks, and a room ends when its host leaves.
+The room creator coordinates each round and must keep the page open. A phone that temporarily switches to another app resynchronizes with the same room when its browser returns. Rooms are designed for small friend groups (up to 12 fingers). Public signaling relays and peer-to-peer networking can be blocked by strict corporate or mobile networks, and a room ends when its host closes the page.
 
 ## Development
 

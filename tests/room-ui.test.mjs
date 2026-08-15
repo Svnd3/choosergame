@@ -55,3 +55,15 @@ test("shared-room entry uses compact six-character codes", () => {
 	assert.match(scriptSource, /Enter the complete 6-character room code\./);
 	assert.doesNotMatch(htmlSource, /ABCD-EFGH-JKMP/);
 });
+
+test("shared rooms resynchronize after a mobile browser returns", () => {
+	assert.doesNotMatch(scriptSource, /ROOM_HOST_RECONNECT_GRACE_MS/);
+	assert.doesNotMatch(scriptSource, /The link creator closed the room/);
+	assert.match(scriptSource, /function resumeSharedRoomConnection\(\)/);
+	assert.match(
+		scriptSource,
+		/document\.addEventListener\("visibilitychange", \(\) => \{[\s\S]*?else resumeSharedRoomConnection\(\);[\s\S]*?\}\);/,
+	);
+	assert.match(scriptSource, /window\.addEventListener\("pageshow",/);
+	assert.match(scriptSource, /window\.addEventListener\("online", resumeSharedRoomConnection\);/);
+});
