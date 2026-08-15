@@ -1,6 +1,5 @@
 import {
 	CATEGORIES,
-	PROMPT_COUNTS,
 	createPromptPicker,
 	getPromptCounts,
 } from "./prompts.js";
@@ -510,9 +509,12 @@ function updateSettingsSummary() {
 		mode: settings.mode,
 		enabledCategories: settings.categories,
 	});
+	const availableCounts = getPromptCounts({
+		enabledCategories: settings.categories,
+	});
 	libraryCount.textContent = guestRoom
 		? "The host controls room prompts · haptics stay personal"
-		: `${selectedCounts.total.toLocaleString()} selected · ${PROMPT_COUNTS.truth.toLocaleString()} truths + ${PROMPT_COUNTS.dare.toLocaleString()} dares offline`;
+		: `${selectedCounts.total.toLocaleString()} selected · ${availableCounts.truth.toLocaleString()} truths + ${availableCounts.dare.toLocaleString()} dares available offline`;
 }
 
 function syncSettingsAccess() {
@@ -563,7 +565,7 @@ function readSettingsControls(changedInput) {
 	if (categories.length === 0 && changedInput.name === "category") {
 		changedInput.checked = true;
 		categories = [changedInput.value];
-		announce("Keep the full deck selected.");
+		announce("Keep at least one deck selected.");
 	}
 
 	settings = {

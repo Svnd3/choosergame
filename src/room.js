@@ -1,4 +1,6 @@
-export const ROOM_PROTOCOL_VERSION = 2;
+// Version 3 is an intentional compatibility boundary: older clients do not
+// understand the opt-in adult deck and must not receive its prompts unlabeled.
+export const ROOM_PROTOCOL_VERSION = 3;
 export const MAX_ROOM_PLAYERS = 12;
 
 const ROOM_SECRET_BYTES = 16;
@@ -466,19 +468,19 @@ export async function connectRoom({
 	);
 	const room = joinRoom(
 		{
-			appId: "choosergame.vercel.app/realtime/v2",
+			appId: "choosergame.vercel.app/realtime/v3",
 			password: secret,
 			relayConfig: {
 				urls: ROOM_RELAY_URLS,
 				warnOnRelayFailure: false,
 			},
 		},
-		`chooser-v2-${secret}`,
+		`chooser-v3-${secret}`,
 		{ onJoinError: handleError },
 	);
-	const stateAction = room.makeAction("state-v2");
-	const intentAction = room.makeAction("intent-v2");
-	const syncAction = room.makeAction("sync-v2");
+	const stateAction = room.makeAction("state-v3");
+	const intentAction = room.makeAction("intent-v3");
+	const syncAction = room.makeAction("sync-v3");
 
 	room.onPeerJoin = handlePeerJoin;
 	room.onPeerLeave = handlePeerLeave;

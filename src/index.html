@@ -177,7 +177,7 @@
 						<h3 id="help-navigation-title">Find your way around</h3>
 						<ul class="help-navigation-list">
 							<li><strong>Red question mark</strong><span>Open this guide at any time.</span></li>
-							<li><strong>Sliders</strong><span>Turn on Truth or Dare and haptics.</span></li>
+							<li><strong>Sliders</strong><span>Turn on Truth or Dare, Naughty Mode, and haptics.</span></li>
 							<li><strong>Device number</strong><span>Open room details and sharing controls.</span></li>
 							<li><strong>Two-finger double-tap</strong><span>Open settings from the board.</span></li>
 						</ul>
@@ -189,6 +189,7 @@
 						<ul>
 							<li>Use one finger per player and wait for the result.</li>
 							<li>Shared rooms support up to 12 active fingers.</li>
+							<li>Naughty Mode is for consenting adults age 18 and over.</li>
 							<li>Anyone may pass on a Truth or Dare—respect boundaries and choose a safe alternative.</li>
 						</ul>
 					</section>
@@ -350,11 +351,25 @@
 					</fieldset>
 
 					<fieldset class="settings-group category-group">
-						<legend>Deck</legend>
+						<legend>Decks</legend>
 						<div class="category-list">
 							<label class="category-option">
-								<span><strong>Full deck</strong><small>119 included prompts</small></span>
+								<span><strong>Standard</strong><small>64 truths + 113 dares</small></span>
 								<input type="checkbox" name="category" value="photos" checked />
+							</label>
+							<label class="category-option adult-option">
+								<span>
+									<strong id="naughty-mode-label">Naughty Mode <em>18+</em></strong>
+									<small id="naughty-mode-description">4 adult truths + 40 really naughty dares</small>
+								</span>
+								<input
+									id="naughty-toggle"
+									type="checkbox"
+									name="category"
+									value="naughty"
+									aria-labelledby="naughty-mode-label"
+									aria-describedby="naughty-mode-description"
+								/>
 							</label>
 						</div>
 					</fieldset>
@@ -373,7 +388,8 @@
 				</div>
 
 				<footer class="settings-footer">
-					<p id="library-count">Truth or Dare is off</p>
+					<p id="library-count" aria-live="polite">Truth or Dare is off</p>
+					<p>Naughty Mode is for consenting adults. Anyone can pass.</p>
 				</footer>
 			</div>
 		</dialog>

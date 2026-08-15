@@ -26,6 +26,8 @@ test("the guide contains rules and accurate navigation help", () => {
 	assert.match(htmlSource, /Find your way around/);
 	assert.match(htmlSource, /Keep it fair/);
 	assert.match(htmlSource, /Shared rooms support up to 12 active fingers/);
+	assert.match(htmlSource, /Naughty Mode is for consenting adults age 18 and over/);
+	assert.match(htmlSource, /Anyone may pass on a Truth or Dare/);
 	assert.match(htmlSource, /local games work offline/);
 });
 

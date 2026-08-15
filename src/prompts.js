@@ -13,12 +13,23 @@ export { DARE_ANYONE_HOME, GO_HOME_DARE };
 export const CATEGORIES = freeze({
 	photos: freeze({
 		id: "photos",
-		label: "Full deck",
-		shortLabel: "Full deck",
-		description: "All 119 included prompts.",
+		label: "Standard",
+		shortLabel: "Standard",
+		description: "64 truths and 113 classic dares.",
 		symbol: "○",
 		accent: "#7DD3FC",
 		defaultEnabled: true,
+	}),
+	naughty: freeze({
+		id: "naughty",
+		label: "Naughty · 18+",
+		shortLabel: "18+",
+		description: "4 explicit truths and 40 daring challenges for consenting adults.",
+		symbol: "✦",
+		accent: "#F43F5E",
+		minimumAge: 18,
+		requiresConsentReminder: true,
+		defaultEnabled: false,
 	}),
 });
 

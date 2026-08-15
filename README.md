@@ -7,8 +7,9 @@ An offline-first finger picker for one screen, with live rooms for friends on se
 - Pick-only mode by default, with a clear next-round action after each pick
 - Private room links and 6-character room codes that sync fingers, movement, countdowns, and one authoritative winner across devices
 - A viewport-filling color and shape reveal on the chosen person's device
-- Optional library of 68 Truth prompts and 51 Dare prompts
-- One curated deck, with exact duplicates removed and no generated fallback prompts
+- Optional library of 68 Truth prompts and 153 Dare prompts—three times the previous dare deck
+- Standard prompts by default, plus an opt-in Naughty Mode with 4 adult truths and 40 adults-only dares
+- Curated decks with exact duplicates removed and no generated fallback prompts
 - Alternating number and shape player identities, so color is never the only cue
 - Electrical canvas animation and optional vibration feedback
 - Two-finger double-tap shortcut for settings
@@ -29,6 +30,8 @@ python3 -m http.server 8001 --directory src
 ```
 
 Then open `http://localhost:8001` on a touch-capable device. When a source file is added, changed, or removed, update the cache list and version in [sw.js](./src/sw.js).
+
+Naughty Mode is off by default and can only be enabled from Truth or Dare settings. It is intended for consenting adults age 18 and over; anyone can pass on any prompt. In a shared room, the host controls the active decks for everyone.
 
 Run the automated tests with:
 

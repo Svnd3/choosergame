@@ -29,8 +29,8 @@ const VENDOR_BUNDLE_URL = new URL(
 	import.meta.url,
 );
 
-test("room protocol constants stay compatible", () => {
-	assert.equal(ROOM_PROTOCOL_VERSION, 2);
+test("room protocol isolates clients without Naughty Mode support", () => {
+	assert.equal(ROOM_PROTOCOL_VERSION, 3);
 	assert.equal(MAX_ROOM_PLAYERS, 12);
 });
 
@@ -272,7 +272,7 @@ test("vendored Trystero is the exact pinned ESM artifact", async () => {
 	assert.match(bundle.toString("utf8"), /Bundled license information/);
 });
 
-test("room transport loads locally with eight fixed relays and is cached by v23", async () => {
+test("room transport loads locally with eight fixed relays and is cached by v24", async () => {
 	const [roomSource, workerSource, vendorNote] = await Promise.all([
 		readFile(new URL("../src/room.js", import.meta.url), "utf8"),
 		readFile(new URL("../src/sw.js", import.meta.url), "utf8"),
@@ -287,15 +287,15 @@ test("room transport loads locally with eight fixed relays and is cached by v23"
 	assert.equal(roomSource.match(/"wss:\/\//g)?.length, 8);
 	assert.match(roomSource, /urls:\s*ROOM_RELAY_URLS/);
 	assert.doesNotMatch(roomSource, /communities\.nos\.social/);
-	assert.match(roomSource, /appId:\s*["']choosergame\.vercel\.app\/realtime\/v2["']/);
-	assert.match(roomSource, /`chooser-v2-\$\{secret\}`/);
-	assert.match(roomSource, /makeAction\(["']state-v2["']\)/);
-	assert.match(roomSource, /makeAction\(["']intent-v2["']\)/);
-	assert.match(roomSource, /makeAction\(["']sync-v2["']\)/);
+	assert.match(roomSource, /appId:\s*["']choosergame\.vercel\.app\/realtime\/v3["']/);
+	assert.match(roomSource, /`chooser-v3-\$\{secret\}`/);
+	assert.match(roomSource, /makeAction\(["']state-v3["']\)/);
+	assert.match(roomSource, /makeAction\(["']intent-v3["']\)/);
+	assert.match(roomSource, /makeAction\(["']sync-v3["']\)/);
 	assert.match(roomSource, /sendSync\(target, data = null\)/);
 	assert.match(roomSource, /handleSync\(data, metadata\.peerId\)/);
 	assert.match(roomSource, /syncAction\.send\(data, \{ target \}\)/);
-	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v23`/);
+	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v24`/);
 	assert.match(workerSource, /"vendor\/trystero-nostr-0\.25\.3\.js"/);
 	assert.match(workerSource, /"fonts\/nok\.otf"/);
 	assert.match(vendorNote, /59,959-byte ESM bundle/);

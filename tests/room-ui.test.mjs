@@ -43,9 +43,9 @@ test("the visible product branding is Pick and Do", () => {
 	);
 	assert.match(
 		htmlSource,
-		/<strong>Full deck<\/strong><small>119 included prompts<\/small>/,
+		/<strong>Standard<\/strong><small>64 truths \+ 113 dares<\/small>/,
 	);
-	assert.match(scriptSource, /Keep the full deck selected\./);
+	assert.match(scriptSource, /Keep at least one deck selected\./);
 });
 
 test("shared-room entry uses compact six-character codes", () => {
