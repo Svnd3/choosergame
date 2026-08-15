@@ -18,9 +18,13 @@ test("shared-room badge renders only its numeric device count", () => {
 	);
 });
 
-test("shared-room card uses local system font fallbacks", () => {
-	assert.doesNotMatch(styleSource, /@font-face/);
-	assert.doesNotMatch(styleSource, /url\("fonts\//);
+test("the wordmark uses Nok while the shared-room card keeps system fonts", () => {
+	assert.match(styleSource, /@font-face \{[\s\S]*?font-family: "Nok";/);
+	assert.match(styleSource, /src: url\("fonts\/nok\.otf"\) format\("opentype"\);/);
+	assert.match(
+		styleSource,
+		/\.brand \{[\s\S]*?font-family: "Nok", "Segoe Print", "Bradley Hand", cursive;/,
+	);
 	assert.match(
 		styleSource,
 		/\.room-header h2 \{[\s\S]*?font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;/,
@@ -29,6 +33,19 @@ test("shared-room card uses local system font fallbacks", () => {
 		styleSource,
 		/#room-dialog \{[\s\S]*?font-family: ui-rounded, "Avenir Next", "Segoe UI", sans-serif;/,
 	);
+});
+
+test("the visible product branding is Pick and Do", () => {
+	assert.match(htmlSource, /<title>Pick and Do — Finger Picker<\/title>/);
+	assert.match(
+		htmlSource,
+		/<p class="brand" aria-label="Pick and Do">Pick <span>and<\/span> Do<\/p>/,
+	);
+	assert.match(
+		htmlSource,
+		/<strong>Full deck<\/strong><small>119 included prompts<\/small>/,
+	);
+	assert.match(scriptSource, /Keep the full deck selected\./);
 });
 
 test("shared-room entry uses compact six-character codes", () => {

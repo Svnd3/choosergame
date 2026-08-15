@@ -12,6 +12,14 @@
 	--ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+@font-face {
+	font-family: "Nok";
+	src: url("fonts/nok.otf") format("opentype");
+	font-display: swap;
+	font-style: normal;
+	font-weight: 400;
+}
+
 * {
 	box-sizing: border-box;
 }
@@ -103,11 +111,14 @@ body[data-game-state="idle"][data-room-mode="connected"] #game-ui {
 
 .brand {
 	margin: 0;
-	font-size: 0.78rem;
-	font-weight: 700;
-	letter-spacing: 0.18em;
-	text-transform: uppercase;
+	font-family: "Nok", "Segoe Print", "Bradley Hand", cursive;
+	font-size: 1.8rem;
+	font-synthesis: none;
+	font-weight: 400;
+	letter-spacing: 0.015em;
+	line-height: 1;
 	pointer-events: auto;
+	white-space: nowrap;
 }
 
 .brand span {
@@ -1430,6 +1441,10 @@ body[data-room-role="guest"][data-room-mode="connected"] #prompt-settings {
 	.topbar {
 		padding-right: calc(12px + env(safe-area-inset-right));
 		padding-left: calc(12px + env(safe-area-inset-left));
+	}
+
+	.brand {
+		font-size: 1.55rem;
 	}
 
 	.room-status-button {

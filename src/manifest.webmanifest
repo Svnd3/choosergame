@@ -1,8 +1,8 @@
 {
-	"name": "Chooser — Finger Picker",
-	"short_name": "Chooser",
+	"name": "Pick and Do — Finger Picker",
+	"short_name": "Pick and Do",
 	"categories": ["entertainment", "games", "social", "utilities"],
-	"description": "An electric finger chooser for one screen or a live room shared across phones.",
+	"description": "An electric finger picker for one screen or a live room shared across phones.",
 	"lang": "en-KE",
 	"display": "standalone",
 	"start_url": "./",

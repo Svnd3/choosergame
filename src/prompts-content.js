@@ -1,4 +1,4 @@
-/** Prompt text transcribed from the supplied photos, with exact duplicates removed. */
+/** Curated prompt text with exact duplicates removed. */
 
 export const GO_HOME_DARE = "Go home.";
 export const DARE_ANYONE_HOME = "Dare anyone here to go home.";
@@ -128,7 +128,7 @@ const dare = [
 	DARE_ANYONE_HOME,
 ];
 
-export const SUPPLIED_PROMPTS = Object.freeze({
+export const CURATED_PROMPTS = Object.freeze({
 	photos: Object.freeze({
 		truth: Object.freeze(truth),
 		dare: Object.freeze(dare),

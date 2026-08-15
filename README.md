@@ -1,14 +1,14 @@
-# Chooser
+# Pick and Do
 
-An offline-first finger chooser for one screen, with live rooms for friends on separate phones. Everyone places one finger, an electric pulse connects the players, and after two seconds one person is picked. Truth or Dare prompts can be enabled in settings.
+An offline-first finger picker for one screen, with live rooms for friends on separate phones. Everyone places one finger, an electric pulse connects the players, and after two seconds one person is picked. Truth or Dare prompts can be enabled in settings.
 
 ## Features
 
-- Chooser-only mode by default, with a clear next-round action after each pick
+- Pick-only mode by default, with a clear next-round action after each pick
 - Private room links and 6-character room codes that sync fingers, movement, countdowns, and one authoritative winner across devices
 - A viewport-filling color and shape reveal on the chosen person's device
-- Optional library of 68 Truth prompts and 51 Dare prompts transcribed from the supplied photos
-- One supplied-photo deck, with exact duplicates removed and no generated fallback prompts
+- Optional library of 68 Truth prompts and 51 Dare prompts
+- One curated deck, with exact duplicates removed and no generated fallback prompts
 - Alternating number and shape player identities, so color is never the only cue
 - Electrical canvas animation and optional vibration feedback
 - Two-finger double-tap shortcut for settings

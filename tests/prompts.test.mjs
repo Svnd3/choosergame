@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
 	CATEGORY_IDS,
+	CATEGORIES,
 	DARE_ANYONE_HOME,
 	DARE_PROMPTS,
 	GO_HOME_DARE,
@@ -11,17 +12,18 @@ import {
 	createPromptPicker,
 	getPrompts,
 } from "../src/prompts.js";
-import { SUPPLIED_PROMPTS } from "../src/prompts-content.js";
+import { CURATED_PROMPTS } from "../src/prompts-content.js";
 
-test("the library contains only the deduplicated supplied-photo deck", () => {
+test("the library contains only the deduplicated full deck", () => {
 	assert.deepEqual(CATEGORY_IDS, ["photos"]);
+	assert.equal(CATEGORIES.photos.label, "Full deck");
 	assert.deepEqual(
 		TRUTH_PROMPTS.map((prompt) => prompt.text),
-		SUPPLIED_PROMPTS.photos.truth,
+		CURATED_PROMPTS.photos.truth,
 	);
 	assert.deepEqual(
 		DARE_PROMPTS.map((prompt) => prompt.text),
-		SUPPLIED_PROMPTS.photos.dare,
+		CURATED_PROMPTS.photos.dare,
 	);
 	assert.deepEqual(
 		{

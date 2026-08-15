@@ -362,7 +362,7 @@ function updateRoomDialog() {
 	roomLobby.hidden = !showingLobby;
 	roomSession.hidden = showingLobby;
 	if (showingLobby) {
-		roomKicker.textContent = "Shared chooser";
+		roomKicker.textContent = "Pick and Do room";
 		roomTitle.textContent = "Play together.";
 		roomCopy.textContent = "Create a room, or enter the code from a friend.";
 		setRoomLobbyBusy(roomLobbyBusy);
@@ -405,7 +405,7 @@ function updateRoomDialog() {
 		return;
 	}
 
-	roomKicker.textContent = "Shared chooser";
+	roomKicker.textContent = "Pick and Do room";
 	roomTitle.textContent = roomMode === "connected" ? "You’re in." : "Finding the room…";
 	roomCopy.textContent =
 		roomMode === "connected"
@@ -455,7 +455,7 @@ async function shareRoomInvite() {
 	}
 	try {
 		await navigator.share({
-			title: "Join my Chooser room",
+			title: "Join my Pick and Do room",
 			text: activeRoomCode
 				? `Enter room code ${formatRoomCode(activeRoomCode)}, or open this link.`
 				: "Open this link, then place a finger on your screen.",
@@ -488,7 +488,7 @@ function updateSettingsSummary() {
 	const guestRoom = isRoomSession() && !isRoomHost();
 
 	if (!settings.promptsEnabled) {
-		activeConfig.textContent = "Chooser only";
+		activeConfig.textContent = "Pick only";
 		libraryCount.textContent = guestRoom
 			? "The host controls room prompts · haptics stay personal"
 			: "Truth or Dare is off · prompts stay hidden after each pick";
@@ -560,7 +560,7 @@ function readSettingsControls(changedInput) {
 	if (categories.length === 0 && changedInput.name === "category") {
 		changedInput.checked = true;
 		categories = [changedInput.value];
-		announce("Keep the supplied-photo deck selected.");
+		announce("Keep the full deck selected.");
 	}
 
 	settings = {
@@ -1162,7 +1162,7 @@ async function connectSharedRoom(
 			onError(details) {
 				if (connectionAttempt !== roomConnectionAttempt) return;
 				const message = typeof details?.error === "string" ? details.error : "Peer connection failed.";
-				console.warn("Chooser room connection warning:", message);
+				console.warn("Pick and Do room connection warning:", message);
 				if (
 					!isRoomHost() &&
 					roomMode !== "connected" &&
@@ -1216,7 +1216,7 @@ async function connectSharedRoom(
 		clearRoomConnectionTimers();
 		setRoomMode(
 			"error",
-			"The secure room service is unavailable right now. Local chooser still works offline.",
+			"The secure room service is unavailable right now. Pick and Do still works offline.",
 		);
 		showRoomDialog();
 	}
@@ -1357,7 +1357,7 @@ function leaveSharedRoom() {
 	closeRoomDialog();
 	prepareNextRound({ broadcast: false });
 	setRoomMode("local");
-	announce("Shared room closed. Local chooser is ready.");
+	announce("Shared room closed. Pick and Do is ready.");
 }
 
 function initializeRoomFromLocation() {

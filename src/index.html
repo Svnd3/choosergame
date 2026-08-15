@@ -8,11 +8,12 @@
 		/>
 		<meta
 			name="description"
-			content="An electric finger chooser for one screen or a live room shared across phones."
+			content="An electric finger picker for one screen or a live room shared across phones."
 		/>
 		<link rel="canonical" href="https://choosergame.vercel.app/" />
-		<title>Chooser — Finger Picker</title>
+		<title>Pick and Do — Finger Picker</title>
 		<link rel="manifest" href="manifest.webmanifest" />
+		<link rel="preload" href="fonts/nok.otf" as="font" type="font/otf" crossorigin />
 		<link rel="icon" sizes="48x48" href="images/logo-48.png" />
 		<link rel="icon" sizes="96x96" href="images/logo-96.png" />
 		<link rel="icon" sizes="144x144" href="images/logo-144.png" />
@@ -37,7 +38,7 @@
 		<canvas id="board" aria-hidden="true"></canvas>
 
 		<header class="topbar">
-			<p class="brand" aria-label="Chooser">chooser<span>.</span></p>
+			<p class="brand" aria-label="Pick and Do">Pick <span>and</span> Do</p>
 			<div class="topbar-actions">
 				<button
 					id="help-button"
@@ -80,7 +81,7 @@
 				<p class="state-copy">
 					Hold one finger per person.<br />We’ll choose in two seconds.
 				</p>
-				<p id="active-config" class="active-config">Chooser only</p>
+				<p id="active-config" class="active-config">Pick only</p>
 				<p class="gesture-hint">Two-finger double-tap opens settings</p>
 			</section>
 
@@ -352,7 +353,7 @@
 						<legend>Deck</legend>
 						<div class="category-list">
 							<label class="category-option">
-								<span><strong>Supplied photos</strong><small>No generated prompts</small></span>
+								<span><strong>Full deck</strong><small>119 included prompts</small></span>
 								<input type="checkbox" name="category" value="photos" checked />
 							</label>
 						</div>

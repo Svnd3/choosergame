@@ -1,9 +1,9 @@
-/** Truth or Dare library built only from the prompts supplied by the user. */
+/** Curated Truth or Dare prompt library. */
 
 import {
 	DARE_ANYONE_HOME,
 	GO_HOME_DARE,
-	SUPPLIED_PROMPTS,
+	CURATED_PROMPTS,
 } from "./prompts-content.js";
 
 const freeze = (value) => Object.freeze(value);
@@ -13,9 +13,9 @@ export { DARE_ANYONE_HOME, GO_HOME_DARE };
 export const CATEGORIES = freeze({
 	photos: freeze({
 		id: "photos",
-		label: "Supplied photos",
-		shortLabel: "Photos",
-		description: "Only prompts transcribed from the supplied photos.",
+		label: "Full deck",
+		shortLabel: "Full deck",
+		description: "All 119 included prompts.",
 		symbol: "○",
 		accent: "#7DD3FC",
 		defaultEnabled: true,
@@ -32,7 +32,7 @@ const DEFAULT_CATEGORY_IDS = freeze(
 
 const makeRecords = (category, mode) =>
 	freeze(
-		SUPPLIED_PROMPTS[category][mode].map((prompt, index) =>
+		CURATED_PROMPTS[category][mode].map((prompt, index) =>
 			freeze({
 				id: `${mode}-${category}-${String(index + 1).padStart(3, "0")}`,
 				mode,
@@ -71,7 +71,7 @@ for (const mode of ["truth", "dare"]) {
 		new Set(prompts.map((prompt) => prompt.id)).size !== prompts.length ||
 		new Set(prompts.map((prompt) => prompt.text)).size !== prompts.length
 	) {
-		throw new Error(`Supplied ${mode} library contains duplicate prompts.`);
+		throw new Error(`Duplicate ${mode} prompts found in the library.`);
 	}
 }
 
