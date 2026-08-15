@@ -167,7 +167,8 @@
 						<h3 id="help-room-title">Play across phones</h3>
 						<ol>
 							<li>Tap <strong>Play across phones</strong> and create a room.</li>
-							<li>Share the invite, or let friends enter the six-character code.</li>
+							<li>Share the direct link, or let friends enter the 2–4 digit convenience code.</li>
+							<li>Codes start at 2 digits and grow to 3 or 4 when the peer network sees a collision.</li>
 							<li>Everyone enters the board and holds a finger; the host keeps the room open.</li>
 						</ol>
 					</section>
@@ -196,7 +197,7 @@
 				</div>
 
 				<p class="help-note">
-					<strong>Good to know:</strong> local games work offline; shared rooms need an internet connection.
+					<strong>Good to know:</strong> local games work offline; shared rooms need internet and rely on best-effort public relays.
 				</p>
 			</div>
 		</dialog>
@@ -207,7 +208,7 @@
 					<div class="room-heading">
 						<p id="room-kicker" class="room-kicker">Shared room</p>
 						<h2 id="room-title">Getting the room ready</h2>
-						<p id="room-copy">Preparing a private invite for this game.</p>
+						<p id="room-copy">Preparing a shared invite for this game.</p>
 					</div>
 					<button
 						id="room-close"
@@ -238,11 +239,13 @@
 								id="room-code-input"
 								class="room-code-input"
 								type="text"
+								inputmode="numeric"
 								autocomplete="one-time-code"
-								autocapitalize="characters"
+								autocapitalize="none"
 								enterkeyhint="go"
-								maxlength="6"
-								placeholder="A7K9P2"
+								minlength="2"
+								pattern="[0-9]{2,4}"
+								placeholder="42"
 								spellcheck="false"
 								aria-describedby="room-code-error"
 							/>
@@ -253,7 +256,9 @@
 						<p id="room-code-error" class="room-code-error" aria-live="polite" hidden></p>
 					</form>
 
-					<p class="room-privacy">The room works while the host keeps it open.</p>
+					<p class="room-privacy">
+						Codes are best effort and easy to guess; use the direct link for more privacy.
+					</p>
 				</div>
 
 				<div id="room-session" class="room-session" hidden>
@@ -290,7 +295,7 @@
 					</div>
 
 					<p class="room-privacy">
-						This invite works while the host keeps the room open.
+						Available while the host stays online; the direct link is more private than the convenience code.
 					</p>
 				</div>
 			</div>

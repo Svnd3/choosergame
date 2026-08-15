@@ -5,7 +5,7 @@ An offline-first finger picker for one screen, with live rooms for friends on se
 ## Features
 
 - Pick-only mode by default, with a clear next-round action after each pick
-- Private room links and 6-character room codes that sync fingers, movement, countdowns, and one authoritative winner across devices
+- Direct room links and 2–4 digit convenience codes that sync fingers, movement, countdowns, and one authoritative winner across devices
 - A viewport-filling color and shape reveal on the chosen person's device
 - Optional library of 68 Truth prompts and 153 Dare prompts—three times the previous dare deck
 - Standard prompts by default, plus an opt-in Naughty Mode with 4 adult truths and 40 adults-only dares
@@ -17,7 +17,7 @@ An offline-first finger picker for one screen, with live rooms for friends on se
 
 ## Shared rooms
 
-Tap **Play across phones**, then create a room and share either its link or 6-character code. Friends can paste the link or type the code in the same panel. Codes are tied to the creator's signing key so guests can verify the room host. The derived room key stays in the URL fragment, so it is not sent to the web server. A 6-character code has 30 bits of entropy and favors convenience over high-security access, so shared rooms are best for casual, short-lived play. Shared play uses encrypted peer-to-peer WebRTC connections and requires an internet connection; local play remains fully offline.
+Tap **Play across phones**, then create a room and share either its direct link or 2–4 digit convenience code. The app first tries 2 digits, then 3, and finally 4 when it observes a live collision. Friends can paste the link or type the code in the same panel. Treat short codes as temporary room hints, not passwords: they are easy to guess, can be reused, and peer-to-peer availability checks are best effort rather than guaranteed reservations. For more privacy, share the direct link; its full room key stays in the URL fragment, so it is not sent to the web server. Shared play uses encrypted peer-to-peer WebRTC connections and public signaling relays, so it requires an internet connection and availability is not guaranteed; local play remains fully offline.
 
 The room creator coordinates each round and must keep the page open. A phone that temporarily switches to another app resynchronizes with the same room when its browser returns. Rooms are designed for small friend groups (up to 12 fingers). Public signaling relays and peer-to-peer networking can be blocked by strict corporate or mobile networks, and a room ends when its host closes the page.
 

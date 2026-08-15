@@ -48,12 +48,15 @@ test("the visible product branding is Pick and Do", () => {
 	assert.match(scriptSource, /Keep at least one deck selected\./);
 });
 
-test("shared-room entry uses compact six-character codes", () => {
-	assert.match(htmlSource, /maxlength="6"/);
-	assert.match(htmlSource, /placeholder="A7K9P2"/);
-	assert.match(scriptSource, /\.slice\(0, 6\)/);
-	assert.match(scriptSource, /Enter the complete 6-character room code\./);
-	assert.doesNotMatch(htmlSource, /ABCD-EFGH-JKMP/);
+test("shared-room entry accepts only exact 2–4 digit convenience codes", () => {
+	assert.match(htmlSource, /type="text"[\s\S]*?inputmode="numeric"/);
+	assert.match(htmlSource, /minlength="2"/);
+	assert.doesNotMatch(htmlSource, /maxlength="4"/);
+	assert.match(htmlSource, /pattern="\[0-9\]\{2,4\}"/);
+	assert.match(htmlSource, /placeholder="42"/);
+	assert.match(scriptSource, /const code = normalizeRoomCode\(value\);/);
+	assert.doesNotMatch(scriptSource, /replace\(\/\[\^0-9\]/);
+	assert.match(scriptSource, /Enter a 2–4 digit room code\./);
 });
 
 test("shared rooms resynchronize after a mobile browser returns", () => {
