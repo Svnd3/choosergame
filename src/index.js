@@ -84,6 +84,9 @@ const resultMeta = document.getElementById("result-meta");
 const resultPrompt = document.getElementById("result-prompt");
 const nextRoundButton = document.getElementById("next-round");
 const nextRoundLabel = document.getElementById("next-round-label");
+const helpButton = document.getElementById("help-button");
+const helpDialog = document.getElementById("help-dialog");
+const helpClose = document.getElementById("help-close");
 const settingsButton = document.getElementById("settings-button");
 const settingsDialog = document.getElementById("settings-dialog");
 const settingsClose = document.getElementById("settings-close");
@@ -2294,7 +2297,7 @@ function releaseAllLocalRoomFingers() {
 }
 
 function onPointerDown(event) {
-	if (settingsDialog.open || gameState === "reveal") return;
+	if (helpDialog.open || settingsDialog.open || gameState === "reveal") return;
 	if (isRoomSession()) {
 		if (!isRoomConnected() || roomDialog.open || ["reveal", "result"].includes(gameState)) return;
 		event.preventDefault();
@@ -2394,7 +2397,7 @@ function clearInterruptedRound() {
 }
 
 function openSettings(source = "button") {
-	if (settingsDialog.open) return;
+	if (helpDialog.open || settingsDialog.open) return;
 	if (isRoomSession() && !isRoomHost()) releaseAllLocalRoomFingers();
 	else prepareNextRound();
 	syncSettingsControls();
@@ -2411,12 +2414,28 @@ function closeSettings() {
 	announce("Game settings closed.");
 }
 
+function openHelp() {
+	if (helpDialog.open || settingsDialog.open || roomDialog.open) return;
+	if (typeof helpDialog.showModal === "function") helpDialog.showModal();
+	else helpDialog.setAttribute("open", "");
+	announce("Game rules and navigation guide opened.");
+}
+
+function closeHelp() {
+	if (!helpDialog.open) return;
+	if (typeof helpDialog.close === "function") helpDialog.close();
+	else helpDialog.removeAttribute("open");
+	announce("Game rules and navigation guide closed.");
+}
+
 canvas.addEventListener("pointerdown", onPointerDown);
 canvas.addEventListener("pointermove", onPointerMove);
 canvas.addEventListener("pointerup", (event) => onPointerEnd(event));
 canvas.addEventListener("pointercancel", (event) => onPointerEnd(event, true));
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
+helpButton.addEventListener("click", openHelp);
+helpClose.addEventListener("click", closeHelp);
 settingsButton.addEventListener("click", () => openSettings("button"));
 settingsClose.addEventListener("click", closeSettings);
 nextRoundButton.addEventListener("click", () => {
@@ -2469,6 +2488,10 @@ updateLink.addEventListener("click", (event) => {
 	event.preventDefault();
 	if (roomMode !== "local") return;
 	window.location.reload();
+});
+
+helpDialog.addEventListener("click", (event) => {
+	if (event.target === helpDialog) closeHelp();
 });
 
 settingsDialog.addEventListener("click", (event) => {

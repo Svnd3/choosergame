@@ -40,6 +40,19 @@
 			<p class="brand" aria-label="Chooser">chooser<span>.</span></p>
 			<div class="topbar-actions">
 				<button
+					id="help-button"
+					class="icon-button help-button"
+					type="button"
+					aria-label="Open game rules and navigation guide"
+					aria-haspopup="dialog"
+					aria-controls="help-dialog"
+				>
+					<svg viewBox="0 0 24 24" aria-hidden="true">
+						<path d="M9.3 8.7a3 3 0 1 1 4.5 2.6c-1.2.7-1.8 1.4-1.8 2.7" />
+						<path d="M12 17.7h.01" />
+					</svg>
+				</button>
+				<button
 					id="room-status-button"
 					class="room-status-button"
 					type="button"
@@ -110,6 +123,81 @@
 		<p id="update-available" hidden>
 			A fresh version is ready. <a href="">Reload</a>
 		</p>
+
+		<dialog
+			id="help-dialog"
+			aria-labelledby="help-title"
+			aria-describedby="help-intro"
+		>
+			<div class="help-shell">
+				<header class="help-header">
+					<div>
+						<p class="help-kicker">Rules &amp; navigation</p>
+						<h2 id="help-title">Your quick guide.</h2>
+						<p id="help-intro">
+							Choose someone on one screen or bring everyone together across phones.
+						</p>
+					</div>
+					<button
+						id="help-close"
+						class="icon-button close-button"
+						type="button"
+						aria-label="Close game rules and navigation guide"
+					>
+						<svg viewBox="0 0 24 24" aria-hidden="true">
+							<path d="M6 6l12 12M18 6 6 18" />
+						</svg>
+					</button>
+				</header>
+
+				<div class="help-grid">
+					<section class="help-card" aria-labelledby="help-local-title">
+						<p class="help-card-number" aria-hidden="true">01</p>
+						<h3 id="help-local-title">Choose on one screen</h3>
+						<ol>
+							<li>Each player presses and holds one finger anywhere on the screen.</li>
+							<li>Keep at least two fingers down and hold steady for two seconds.</li>
+							<li>Lift every finger after the reveal, then tap <strong>Next round</strong>.</li>
+						</ol>
+					</section>
+
+					<section class="help-card" aria-labelledby="help-room-title">
+						<p class="help-card-number" aria-hidden="true">02</p>
+						<h3 id="help-room-title">Play across phones</h3>
+						<ol>
+							<li>Tap <strong>Play across phones</strong> and create a room.</li>
+							<li>Share the invite, or let friends enter the six-character code.</li>
+							<li>Everyone enters the board and holds a finger; the host keeps the room open.</li>
+						</ol>
+					</section>
+
+					<section class="help-card" aria-labelledby="help-navigation-title">
+						<p class="help-card-number" aria-hidden="true">03</p>
+						<h3 id="help-navigation-title">Find your way around</h3>
+						<ul class="help-navigation-list">
+							<li><strong>Red question mark</strong><span>Open this guide at any time.</span></li>
+							<li><strong>Sliders</strong><span>Turn on Truth or Dare and haptics.</span></li>
+							<li><strong>Device number</strong><span>Open room details and sharing controls.</span></li>
+							<li><strong>Two-finger double-tap</strong><span>Open settings from the board.</span></li>
+						</ul>
+					</section>
+
+					<section class="help-card" aria-labelledby="help-rules-title">
+						<p class="help-card-number" aria-hidden="true">04</p>
+						<h3 id="help-rules-title">Keep it fair</h3>
+						<ul>
+							<li>Use one finger per player and wait for the result.</li>
+							<li>Shared rooms support up to 12 active fingers.</li>
+							<li>Anyone may pass on a Truth or Dare—respect boundaries and choose a safe alternative.</li>
+						</ul>
+					</section>
+				</div>
+
+				<p class="help-note">
+					<strong>Good to know:</strong> local games work offline; shared rooms need an internet connection.
+				</p>
+			</div>
+		</dialog>
 
 		<dialog id="room-dialog" aria-labelledby="room-title">
 			<div class="room-shell">
