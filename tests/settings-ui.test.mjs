@@ -15,7 +15,7 @@ test("Naughty Mode is visible, adults-only, consent-forward, and off by default"
 		htmlSource,
 		/<strong id="naughty-mode-label">Naughty Mode <em>18\+<\/em><\/strong>/,
 	);
-	assert.match(htmlSource, /4 adult truths \+ 40 really naughty dares/);
+	assert.match(htmlSource, /25 explicit truths \+ 100 tough naughty dares/);
 	assert.ok(naughtyToggle);
 	assert.match(
 		naughtyToggle,

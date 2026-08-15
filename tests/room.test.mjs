@@ -476,7 +476,7 @@ test("vendored Trystero is the exact pinned ESM artifact", async () => {
 	assert.match(bundle.toString("utf8"), /Bundled license information/);
 });
 
-test("room transport shares v5 peers across game/code channels and is cached by v26", async () => {
+test("room transport shares v5 peers across game/code channels and is cached by v27", async () => {
 	const [roomSource, workerSource, vendorNote] = await Promise.all([
 		readFile(new URL("../src/room.js", import.meta.url), "utf8"),
 		readFile(new URL("../src/sw.js", import.meta.url), "utf8"),
@@ -502,7 +502,7 @@ test("room transport shares v5 peers across game/code channels and is cached by 
 	assert.match(roomSource, /sendSync\(target, data = null\)/);
 	assert.match(roomSource, /handleSync\(data, metadata\.peerId\)/);
 	assert.match(roomSource, /syncAction\.send\(data, \{ target \}\)/);
-	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v26`/);
+	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v27`/);
 	assert.match(workerSource, /"vendor\/trystero-nostr-0\.25\.3\.js"/);
 	assert.match(workerSource, /"fonts\/nok\.otf"/);
 	assert.match(vendorNote, /59,959-byte ESM bundle/);

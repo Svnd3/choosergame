@@ -7,8 +7,8 @@ An offline-first finger picker for one screen, with live rooms for friends on se
 - Pick-only mode by default, with a clear next-round action after each pick
 - Direct room links and 2–4 digit convenience codes that sync fingers, movement, countdowns, and one authoritative winner across devices
 - A viewport-filling color and shape reveal on the chosen person's device
-- Optional library of 68 Truth prompts and 153 Dare prompts—three times the previous dare deck
-- Standard prompts by default, plus an opt-in Naughty Mode with 4 adult truths and 40 adults-only dares
+- Optional library of 89 Truth prompts and 213 Dare prompts
+- Standard prompts by default, plus an opt-in Naughty Mode with 25 explicit truths and 100 tough adults-only dares
 - Curated decks with exact duplicates removed and no generated fallback prompts
 - Alternating number and shape player identities, so color is never the only cue
 - Electrical canvas animation and optional vibration feedback

@@ -24,7 +24,7 @@ export const CATEGORIES = freeze({
 		id: "naughty",
 		label: "Naughty · 18+",
 		shortLabel: "18+",
-		description: "4 explicit truths and 40 daring challenges for consenting adults.",
+		description: "25 explicit truths and 100 tough naughty dares for consenting adults.",
 		symbol: "✦",
 		accent: "#F43F5E",
 		minimumAge: 18,
