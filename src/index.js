@@ -275,7 +275,12 @@ function updateRoomChrome() {
 	const total = roomDeviceTotal();
 	roomStatusButton.hidden = roomMode === "local";
 	const visibleTotal = Math.max(1, total);
-	roomDeviceCount.textContent = `${visibleTotal} device${visibleTotal === 1 ? "" : "s"}`;
+	const deviceLabel = `${visibleTotal} device${visibleTotal === 1 ? "" : "s"}`;
+	roomDeviceCount.textContent = String(visibleTotal);
+	roomStatusButton.setAttribute(
+		"aria-label",
+		`Open shared room details, ${deviceLabel} connected`,
+	);
 	settingsButton.hidden = false;
 	syncSettingsAccess();
 	updateRoomDialog();
