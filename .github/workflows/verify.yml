@@ -23,5 +23,5 @@ jobs:
           node --check src/room.js
           node --check src/vendor/trystero-nostr-0.25.3.js
           node --check src/sw.js
-      - name: Run room protocol tests
-        run: node --test tests/room.test.mjs
+      - name: Run automated tests
+        run: node --test tests/*.test.mjs

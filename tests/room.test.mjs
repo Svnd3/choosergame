@@ -185,7 +185,7 @@ test("vendored Trystero is the exact pinned ESM artifact", async () => {
 	assert.match(bundle.toString("utf8"), /Bundled license information/);
 });
 
-test("room transport loads locally with eight fixed relays and is cached by v15", async () => {
+test("room transport loads locally with eight fixed relays and is cached by v16", async () => {
 	const [roomSource, workerSource, vendorNote] = await Promise.all([
 		readFile(new URL("../src/room.js", import.meta.url), "utf8"),
 		readFile(new URL("../src/sw.js", import.meta.url), "utf8"),
@@ -203,7 +203,7 @@ test("room transport loads locally with eight fixed relays and is cached by v15"
 	assert.match(roomSource, /makeAction\(["']sync-v1["']\)/);
 	assert.match(roomSource, /sendSync\(target\)/);
 	assert.match(roomSource, /syncAction\.send\(null, \{ target \}\)/);
-	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v15`/);
+	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v16`/);
 	assert.match(workerSource, /"vendor\/trystero-nostr-0\.25\.3\.js"/);
 	assert.match(vendorNote, /59,959-byte ESM bundle/);
 	assert.match(

@@ -1,84 +1,27 @@
-/** Curated Kenyan Truth or Dare library for Chooser. */
+/** Truth or Dare library built only from the prompts supplied by the user. */
 
-import { GO_HOME_DARE, KENYAN_PROMPTS } from "./prompts-content.js";
+import {
+	DARE_ANYONE_HOME,
+	GO_HOME_DARE,
+	SUPPLIED_PROMPTS,
+} from "./prompts-content.js";
 
 const freeze = (value) => Object.freeze(value);
 
-export { GO_HOME_DARE };
+export { DARE_ANYONE_HOME, GO_HOME_DARE };
 
 export const CATEGORIES = freeze({
-	neutral: freeze({
-		id: "neutral",
-		label: "Neutral",
-		shortLabel: "Easy",
-		description: "Easy prompts about everyday Kenyan life.",
+	photos: freeze({
+		id: "photos",
+		label: "Supplied photos",
+		shortLabel: "Photos",
+		description: "Only prompts transcribed from the supplied photos.",
 		symbol: "○",
 		accent: "#7DD3FC",
-		minimumAge: 0,
-		contentRating: "everyone",
-		requiresConsentReminder: false,
-		defaultEnabled: true,
-	}),
-	funny: freeze({
-		id: "funny",
-		label: "Funny",
-		shortLabel: "Laughs",
-		description: "Matatu moments, Kenyan excuses, and harmless local chaos.",
-		symbol: "△",
-		accent: "#FDE047",
-		minimumAge: 0,
-		contentRating: "everyone",
-		requiresConsentReminder: false,
-		defaultEnabled: true,
-	}),
-	deep: freeze({
-		id: "deep",
-		label: "Deep",
-		shortLabel: "Real",
-		description: "Real conversations about home, family, identity, and hope.",
-		symbol: "◇",
-		accent: "#A78BFA",
-		minimumAge: 13,
-		contentRating: "teen",
-		requiresConsentReminder: true,
-		defaultEnabled: true,
-	}),
-	couples: freeze({
-		id: "couples",
-		label: "Couples",
-		shortLabel: "Us",
-		description: "Kenyan date-night prompts for partners playing together.",
-		symbol: "∞",
-		accent: "#FB7185",
-		minimumAge: 16,
-		contentRating: "mature",
-		requiresConsentReminder: true,
-		defaultEnabled: false,
-	}),
-	bold: freeze({
-		id: "bold",
-		label: "Bold",
-		shortLabel: "Brave",
-		description: "Confident Kenyan challenges with big main-character energy.",
-		symbol: "□",
-		accent: "#FB923C",
-		minimumAge: 16,
-		contentRating: "mature",
-		requiresConsentReminder: true,
-		defaultEnabled: false,
-	}),
-	naughty: freeze({
-		id: "naughty",
-		label: "Naughty · 18+",
-		shortLabel: "18+",
-		description: "Adult Kenyan flirting and intimacy prompts, always consent-first.",
-		symbol: "✦",
-		accent: "#F43F5E",
 		minimumAge: 18,
-		contentRating: "explicit-18+",
-		requiresAgeConfirmation: true,
+		contentRating: "mature",
 		requiresConsentReminder: true,
-		defaultEnabled: false,
+		defaultEnabled: true,
 	}),
 });
 
@@ -92,25 +35,18 @@ const DEFAULT_CATEGORY_IDS = freeze(
 
 const makeRecords = (category, mode) =>
 	freeze(
-		KENYAN_PROMPTS[category][mode].map((prompt, index) => {
-			const consentSuffix =
-				category === "naughty"
-					? mode === "truth"
-						? " Adults only: answer only if comfortable; passing is always okay."
-						: " Clear consent is required, and anyone may pass."
-					: "";
-
-			return freeze({
+		SUPPLIED_PROMPTS[category][mode].map((prompt, index) =>
+			freeze({
 				id: `${mode}-${category}-${String(index + 1).padStart(3, "0")}`,
 				mode,
 				category,
-				text: `${prompt}${consentSuffix}`,
+				text: prompt,
 				minimumAge: CATEGORIES[category].minimumAge,
 				contentRating: CATEGORIES[category].contentRating,
 				requiresConsentReminder: CATEGORIES[category].requiresConsentReminder,
-				locale: "en-KE",
-			});
-		}),
+				locale: "en",
+			}),
+		),
 	);
 
 const truthByCategory = {};
@@ -141,7 +77,7 @@ for (const mode of ["truth", "dare"]) {
 		new Set(prompts.map((prompt) => prompt.id)).size !== prompts.length ||
 		new Set(prompts.map((prompt) => prompt.text)).size !== prompts.length
 	) {
-		throw new Error(`Curated ${mode} library contains duplicate prompts.`);
+		throw new Error(`Supplied ${mode} library contains duplicate prompts.`);
 	}
 }
 

@@ -28,7 +28,7 @@ const ROOM_STATE_BROADCAST_INTERVAL_MS = 40;
 const ROOM_JOIN_TIMEOUT_MS = 35000;
 const ROOM_SYNC_RETRY_DELAYS_MS = [0, 1200, 3000, 7000, 12000, 20000];
 const ROOM_HOST_RECONNECT_GRACE_MS = 5000;
-const SETTINGS_STORAGE_KEY = "chooser-game-settings-v2";
+const SETTINGS_STORAGE_KEY = "chooser-game-settings-v3";
 const DEFAULT_ACCENT = "#ff315f";
 const PLAYER_HUES = [346, 192, 48, 268, 124, 24, 218, 305, 88, 164, 10, 240];
 const SHAPES = [
@@ -147,7 +147,7 @@ function loadSettings() {
 	const fallback = {
 		promptsEnabled: false,
 		mode: "mix",
-		categories: ["neutral", "funny", "bold"],
+		categories: ["photos"],
 		haptics: true,
 	};
 
@@ -404,17 +404,17 @@ function updateSettingsSummary() {
 		activeConfig.textContent = "Chooser only";
 		libraryCount.textContent = guestRoom
 			? "The host controls room prompts · haptics stay personal"
-			: "Kenyan Truth or Dare is off · prompts stay hidden after each pick";
+			: "Truth or Dare is off · prompts stay hidden after each pick";
 		return;
 	}
 
 	const modeLabel = settings.mode === "mix" ? "Mix" : titleCase(settings.mode);
-	const categoryLabels = settings.categories.map((category) => CATEGORIES[category].label.replace(" · 18+", ""));
-	const vibeLabel =
+	const categoryLabels = settings.categories.map((category) => CATEGORIES[category].label);
+	const deckLabel =
 		categoryLabels.length <= 3
 			? categoryLabels.join(" + ")
-			: `${categoryLabels.length} vibes`;
-	activeConfig.textContent = `${modeLabel} · ${vibeLabel}`;
+			: `${categoryLabels.length} decks`;
+	activeConfig.textContent = `${modeLabel} · ${deckLabel}`;
 
 	const selectedCounts = getPromptCounts({
 		mode: settings.mode,
@@ -466,16 +466,6 @@ function readSettingsControls(changedInput) {
 		return;
 	}
 
-	if (changedInput.value === "naughty" && changedInput.checked) {
-		const confirmed = window.confirm(
-			"Naughty prompts are for consenting adults only. Confirm that you are 18 or older to enable them.",
-		);
-		if (!confirmed) {
-			changedInput.checked = false;
-			announce("Naughty prompts stayed off.");
-		}
-	}
-
 	const mode = document.querySelector('input[name="mode"]:checked')?.value ?? "mix";
 	const categoryInputs = [...document.querySelectorAll('input[name="category"]')];
 	let categories = categoryInputs.filter((input) => input.checked).map((input) => input.value);
@@ -483,7 +473,7 @@ function readSettingsControls(changedInput) {
 	if (categories.length === 0 && changedInput.name === "category") {
 		changedInput.checked = true;
 		categories = [changedInput.value];
-		announce("Keep at least one vibe selected.");
+		announce("Keep the supplied-photo deck selected.");
 	}
 
 	settings = {
@@ -495,10 +485,6 @@ function readSettingsControls(changedInput) {
 	if (!settings.haptics && typeof navigator.vibrate === "function") navigator.vibrate(0);
 	saveSettings();
 	updateSettingsSummary();
-
-	if (changedInput.value === "naughty" && changedInput.checked) {
-		announce("Naughty prompts enabled for consenting adults only. Anyone can pass.");
-	}
 }
 
 function safeVibrate(pattern) {
@@ -1717,11 +1703,6 @@ function commitResult(now) {
 		? promptPicker.pick({
 				mode: settings.mode,
 				enabledCategories: settings.categories,
-			}) ??
-			Object.freeze({
-				mode: "truth",
-				category: "neutral",
-				text: "Which Kenyan moment made you smile today?",
 			})
 		: null;
 	const frozenWinner = { ...winner };
