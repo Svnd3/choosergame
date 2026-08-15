@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-KE">
 	<head>
 		<meta charset="utf-8" />
 		<meta
@@ -8,10 +8,10 @@
 		/>
 		<meta
 			name="description"
-			content="A fast, electric finger chooser for Truth or Dare nights."
+			content="An electric finger chooser for one screen or a live room shared across phones."
 		/>
 		<link rel="canonical" href="https://choosergame.vercel.app/" />
-		<title>Chooser — Truth or Dare</title>
+		<title>Chooser — Finger Picker</title>
 		<link rel="manifest" href="manifest.webmanifest" />
 		<link rel="icon" sizes="48x48" href="images/logo-48.png" />
 		<link rel="icon" sizes="96x96" href="images/logo-96.png" />
@@ -27,30 +27,48 @@
 		<link rel="stylesheet" href="index.css" />
 		<script type="module" src="index.js"></script>
 	</head>
-	<body data-game-state="idle" data-identity-style="numbers">
+	<body
+		data-game-state="idle"
+		data-identity-style="numbers"
+		data-room-mode="local"
+		data-room-role="host"
+		data-winner-device="false"
+	>
 		<canvas id="board" aria-hidden="true"></canvas>
 
 		<header class="topbar">
 			<p class="brand" aria-label="Chooser">chooser<span>.</span></p>
-			<button
-				id="settings-button"
-				class="icon-button"
-				type="button"
-				aria-label="Open game settings"
-			>
-				<svg viewBox="0 0 24 24" aria-hidden="true">
-					<path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M10 14v6" />
-				</svg>
-			</button>
+			<div class="topbar-actions">
+				<button
+					id="room-status-button"
+					class="room-status-button"
+					type="button"
+					aria-label="Open shared room details"
+					hidden
+				>
+					<span class="room-status-button-dot" aria-hidden="true"></span>
+					<span id="room-device-count">1 device</span>
+				</button>
+				<button
+					id="settings-button"
+					class="icon-button"
+					type="button"
+					aria-label="Open game settings"
+				>
+					<svg viewBox="0 0 24 24" aria-hidden="true">
+						<path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M10 14v6" />
+					</svg>
+				</button>
+			</div>
 		</header>
 
 		<main id="game-ui">
 			<section id="idle-panel" class="state-panel" aria-labelledby="idle-title">
-				<h1 id="idle-title">Everyone in.</h1>
+				<h1 id="idle-title">Fingers down.</h1>
 				<p class="state-copy">
-					Hold one finger each.<br />We’ll choose in two seconds.
+					Hold one finger per person.<br />We’ll choose in two seconds.
 				</p>
-				<p id="active-config" class="active-config">Mix · Neutral + Funny + Bold</p>
+				<p id="active-config" class="active-config">Chooser only</p>
 				<p class="gesture-hint">Two-finger double-tap opens settings</p>
 			</section>
 
@@ -70,8 +88,8 @@
 				aria-labelledby="result-prompt"
 				hidden
 			>
-				<p id="result-meta" class="result-meta">Player 1 · Truth</p>
-				<h2 id="result-prompt">What is your most harmless secret?</h2>
+				<p id="result-meta" class="result-meta">Chosen</p>
+				<h2 id="result-prompt">Player 1</h2>
 				<button id="next-round" class="next-round" type="button">
 					<span id="next-round-label">Next round</span>
 					<svg viewBox="0 0 24 24" aria-hidden="true">
@@ -81,18 +99,83 @@
 			</section>
 		</main>
 
+		<button id="room-entry-button" class="room-entry-button" type="button">
+			<svg viewBox="0 0 24 24" aria-hidden="true">
+				<path d="M8.2 11.4a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4ZM2.8 19c.4-3 2.2-4.7 5.4-4.7 1.2 0 2.2.2 3 .7M16.8 10.2a2.6 2.6 0 1 0 0-5.2M16 14.4h1.1c2.4 0 3.8 1.3 4.1 3.6M10.8 17.1l2.1-2.1a2 2 0 0 1 2.8 2.8l-.7.7M13.2 18.9 11 21a2 2 0 0 1-2.8-2.8l.7-.7" />
+			</svg>
+			<span>Play across phones</span>
+		</button>
+
 		<p id="version" aria-hidden="true"></p>
 		<div id="live-region" aria-live="assertive" class="visually-hidden"></div>
 		<p id="update-available" hidden>
 			A fresh version is ready. <a href="">Reload</a>
 		</p>
 
+		<dialog id="room-dialog" aria-labelledby="room-title">
+			<div class="room-shell">
+				<header class="room-header">
+					<div class="room-heading">
+						<p id="room-kicker" class="room-kicker">Shared room</p>
+						<h2 id="room-title">Getting the room ready</h2>
+						<p id="room-copy">Preparing a private invite for this game.</p>
+					</div>
+					<button
+						id="room-close"
+						class="icon-button close-button"
+						type="button"
+						aria-label="Close shared room"
+					>
+						<svg viewBox="0 0 24 24" aria-hidden="true">
+							<path d="M6 6l12 12M18 6 6 18" />
+						</svg>
+					</button>
+				</header>
+
+				<div class="room-state" aria-live="polite">
+					<p id="room-status-line" class="room-status-line">Preparing connection…</p>
+					<div class="room-code-row">
+						<span>Room code</span>
+						<code id="room-code">— — — — — —</code>
+					</div>
+				</div>
+
+				<div class="room-actions">
+					<div class="room-share-actions">
+						<button id="room-share" class="room-action room-action-primary" type="button">
+							<svg viewBox="0 0 24 24" aria-hidden="true">
+								<path d="M12 16V4M7.5 8.5 12 4l4.5 4.5M5 13v6h14v-6" />
+							</svg>
+							<span>Share invite</span>
+						</button>
+						<button id="room-copy-link" class="room-action room-action-secondary" type="button">
+							<svg viewBox="0 0 24 24" aria-hidden="true">
+								<path d="M9.5 14.5 14.5 9M7.3 16.7l-1 1a3.5 3.5 0 0 1-5-5l3.1-3.1a3.5 3.5 0 0 1 5-.1M16.7 7.3l1-1a3.5 3.5 0 0 1 5 5l-3.1 3.1a3.5 3.5 0 0 1-5 .1" />
+							</svg>
+							<span>Copy link</span>
+						</button>
+					</div>
+					<button id="room-enter" class="room-action room-action-primary room-enter" type="button">
+						<span>Join room</span>
+						<svg viewBox="0 0 24 24" aria-hidden="true">
+							<path d="M5 12h14M14 7l5 5-5 5" />
+						</svg>
+					</button>
+					<button id="room-leave" class="room-leave" type="button">Leave room</button>
+				</div>
+
+				<p class="room-privacy">
+					This invite is private and expires when the host leaves.
+				</p>
+			</div>
+		</dialog>
+
 		<dialog id="settings-dialog" aria-labelledby="settings-title">
 			<div class="settings-shell">
 				<header class="settings-header">
 					<div>
 						<h2 id="settings-title">Game setup</h2>
-						<p>Pick the mood. The room does the rest.</p>
+						<p>Choose what happens after a pick.</p>
 					</div>
 					<button
 						id="settings-close"
@@ -106,55 +189,73 @@
 					</button>
 				</header>
 
-				<fieldset class="settings-group mode-group">
-					<legend>Game</legend>
-					<div class="segmented-control">
-						<label>
-							<input type="radio" name="mode" value="truth" />
-							<span>Truth</span>
-						</label>
-						<label>
-							<input type="radio" name="mode" value="mix" checked />
-							<span>Mix</span>
-						</label>
-						<label>
-							<input type="radio" name="mode" value="dare" />
-							<span>Dare</span>
-						</label>
-					</div>
-				</fieldset>
+				<div id="prompt-toggle-row" class="settings-group toggle-row">
+					<span>
+						<strong>Kenyan Truth or Dare</strong>
+						<small>Show a prompt after each player is chosen</small>
+					</span>
+					<label class="switch">
+						<input
+							id="prompts-toggle"
+							type="checkbox"
+							aria-controls="prompt-settings"
+						/>
+						<span aria-hidden="true"></span>
+						<b class="visually-hidden">Enable Kenyan Truth or Dare prompts</b>
+					</label>
+				</div>
 
-				<fieldset class="settings-group category-group">
-					<legend>Vibes</legend>
-					<div class="category-list">
-						<label class="category-option">
-							<span><strong>Neutral</strong><small>Easy and all-room safe</small></span>
-							<input type="checkbox" name="category" value="neutral" checked />
-						</label>
-						<label class="category-option">
-							<span><strong>Funny</strong><small>Ridiculous, never cruel</small></span>
-							<input type="checkbox" name="category" value="funny" checked />
-						</label>
-						<label class="category-option">
-							<span><strong>Deep</strong><small>Honest and reflective</small></span>
-							<input type="checkbox" name="category" value="deep" />
-						</label>
-						<label class="category-option">
-							<span><strong>Bold</strong><small>Brave, loud, high-energy</small></span>
-							<input type="checkbox" name="category" value="bold" checked />
-						</label>
-						<label class="category-option">
-							<span><strong>Couples</strong><small>Closeness and chemistry</small></span>
-							<input type="checkbox" name="category" value="couples" />
-						</label>
-						<label class="category-option adult-option">
-							<span><strong>Naughty <em>18+</em></strong><small>Flirty and consent-first</small></span>
-							<input type="checkbox" name="category" value="naughty" />
-						</label>
-					</div>
-				</fieldset>
+				<div id="prompt-settings" hidden>
+					<fieldset class="settings-group mode-group">
+						<legend>Prompt type</legend>
+						<div class="segmented-control">
+							<label>
+								<input type="radio" name="mode" value="truth" />
+								<span>Truth</span>
+							</label>
+							<label>
+								<input type="radio" name="mode" value="mix" checked />
+								<span>Mix</span>
+							</label>
+							<label>
+								<input type="radio" name="mode" value="dare" />
+								<span>Dare</span>
+							</label>
+						</div>
+					</fieldset>
 
-				<div class="settings-group haptics-row">
+					<fieldset class="settings-group category-group">
+						<legend>Vibes</legend>
+						<div class="category-list">
+							<label class="category-option">
+								<span><strong>Neutral</strong><small>Easy and all-room safe</small></span>
+								<input type="checkbox" name="category" value="neutral" checked />
+							</label>
+							<label class="category-option">
+								<span><strong>Funny</strong><small>Ridiculous, never cruel</small></span>
+								<input type="checkbox" name="category" value="funny" checked />
+							</label>
+							<label class="category-option">
+								<span><strong>Deep</strong><small>Honest and reflective</small></span>
+								<input type="checkbox" name="category" value="deep" />
+							</label>
+							<label class="category-option">
+								<span><strong>Bold</strong><small>Brave, loud, high-energy</small></span>
+								<input type="checkbox" name="category" value="bold" checked />
+							</label>
+							<label class="category-option">
+								<span><strong>Couples</strong><small>Closeness and chemistry</small></span>
+								<input type="checkbox" name="category" value="couples" />
+							</label>
+							<label class="category-option adult-option">
+								<span><strong>Naughty <em>18+</em></strong><small>Flirty and consent-first</small></span>
+								<input type="checkbox" name="category" value="naughty" />
+							</label>
+						</div>
+					</fieldset>
+				</div>
+
+				<div class="settings-group toggle-row">
 					<span>
 						<strong>Haptics</strong>
 						<small>Subtle pulses and a winner beat</small>
@@ -167,7 +268,7 @@
 				</div>
 
 				<footer class="settings-footer">
-					<p id="library-count">2,400+ prompts available offline</p>
+					<p id="library-count">Kenyan Truth or Dare is off</p>
 					<p>Naughty is for consenting adults. Anyone can skip any prompt.</p>
 				</footer>
 			</div>

@@ -4,6 +4,17 @@ import {
 	createPromptPicker,
 	getPromptCounts,
 } from "./prompts.js";
+import {
+	MAX_ROOM_PLAYERS,
+	ROOM_PROTOCOL_VERSION,
+	connectRoom,
+	createRoomSecret,
+	denormalizePoint,
+	makeRoomUrl,
+	normalizePoint,
+	parseRoomHash,
+	sanitizeFingerIntent,
+} from "./room.js";
 
 const MIN_PLAYERS = 2;
 const CHOOSE_DELAY_MS = 2000;
@@ -11,6 +22,11 @@ const REVEAL_ANIMATION_DURATION_MS = 680;
 const WINNER_DISPLAY_DURATION_MS = 2600;
 const COUNTDOWN_HAPTIC_INTERVAL_MS = 400;
 const ELECTRIC_DOT_SPEED = 1.15;
+const ROOM_MOVE_INTERVAL_MS = 40;
+const ROOM_RECEIVE_MOVE_INTERVAL_MS = 28;
+const ROOM_STATE_BROADCAST_INTERVAL_MS = 40;
+const ROOM_JOIN_TIMEOUT_MS = 18000;
+const ROOM_HOST_RECONNECT_GRACE_MS = 5000;
 const SETTINGS_STORAGE_KEY = "chooser-game-settings-v2";
 const DEFAULT_ACCENT = "#ff315f";
 const PLAYER_HUES = [346, 192, 48, 268, 124, 24, 218, 305, 88, 164, 10, 240];
@@ -53,11 +69,30 @@ const nextRoundLabel = document.getElementById("next-round-label");
 const settingsButton = document.getElementById("settings-button");
 const settingsDialog = document.getElementById("settings-dialog");
 const settingsClose = document.getElementById("settings-close");
+const promptsToggle = document.getElementById("prompts-toggle");
+const promptSettings = document.getElementById("prompt-settings");
 const hapticsToggle = document.getElementById("haptics-toggle");
 const libraryCount = document.getElementById("library-count");
 const ariaLive = document.getElementById("live-region");
 const version = document.getElementById("version");
 const updateAvailable = document.getElementById("update-available");
+const updateLink = updateAvailable.querySelector("a");
+const roomEntryButton = document.getElementById("room-entry-button");
+const roomStatusButton = document.getElementById("room-status-button");
+const roomDeviceCount = document.getElementById("room-device-count");
+const roomDialog = document.getElementById("room-dialog");
+const roomClose = document.getElementById("room-close");
+const roomKicker = document.getElementById("room-kicker");
+const roomTitle = document.getElementById("room-title");
+const roomCopy = document.getElementById("room-copy");
+const roomStatusLine = document.getElementById("room-status-line");
+const roomCode = document.getElementById("room-code");
+const roomShare = document.getElementById("room-share");
+const roomCopyLink = document.getElementById("room-copy-link");
+const roomEnter = document.getElementById("room-enter");
+const roomLeave = document.getElementById("room-leave");
+const roomCopyLinkLabel = roomCopyLink.querySelector("span");
+const roomEnterLabel = roomEnter.querySelector("span");
 const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
 
 if (!ctx) throw new Error("This browser does not support the 2D canvas API.");
@@ -65,6 +100,13 @@ if (!ctx) throw new Error("This browser does not support the 2D canvas API.");
 const promptPicker = createPromptPicker({ historySize: 32 });
 const players = new Map();
 const physicalPointers = new Set();
+const localRoomFingerIds = new Map();
+const roomActiveFingerIds = new Set();
+const roomIntentSequences = new Map();
+const roomOutgoingSequences = new Map();
+const roomLastMoveSentAt = new Map();
+const roomLastMoveReceivedAt = new Map();
+const roomPeerIds = new Set();
 
 let gameState = "idle";
 let completedRounds = 0;
@@ -81,9 +123,27 @@ let viewport = { width: window.innerWidth, height: window.innerHeight, dpr: 1 };
 let activeChord = null;
 let previousChord = null;
 let settings = loadSettings();
+let localSettingsBeforeRoom = null;
+let roomMode = "local";
+let roomRole = "guest";
+let roomSecret = null;
+let roomLink = "";
+let roomTransport = null;
+let roomHostPeerId = null;
+let roomStateSequence = 0;
+let lastAppliedRoomSequence = 0;
+let roomRound = 0;
+let roomStatusMessage = "";
+let roomConnectionAttempt = 0;
+let roomJoinTimeout = null;
+let roomHostDepartureTimeout = null;
+let roomSnapshotBroadcastTimeout = null;
+let roomLastSnapshotBroadcastAt = 0;
+let updateReady = false;
 
 function loadSettings() {
 	const fallback = {
+		promptsEnabled: false,
 		mode: "mix",
 		categories: ["neutral", "funny", "bold"],
 		haptics: true,
@@ -99,6 +159,7 @@ function loadSettings() {
 			: fallback.categories;
 
 		return {
+			promptsEnabled: saved?.promptsEnabled === true,
 			mode,
 			categories: categories.length ? categories : fallback.categories,
 			haptics: saved?.haptics !== false,
@@ -108,9 +169,9 @@ function loadSettings() {
 	}
 }
 
-function saveSettings() {
+function saveSettings(value = settings) {
 	try {
-		localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+		localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(value));
 	} catch {
 		// The game remains fully usable when storage is unavailable.
 	}
@@ -121,6 +182,153 @@ function announce(message) {
 	line.textContent = message;
 	ariaLive.append(line);
 	while (ariaLive.children.length > 8) ariaLive.firstElementChild.remove();
+}
+
+function isRoomSession() {
+	return roomMode !== "local";
+}
+
+function isRoomConnected() {
+	return roomMode === "connected" && roomTransport !== null;
+}
+
+function isRoomHost() {
+	return isRoomSession() && roomRole === "host";
+}
+
+function roomDeviceTotal() {
+	return roomPeerIds.size + (roomTransport ? 1 : 0);
+}
+
+function clearRoomConnectionTimers() {
+	if (roomJoinTimeout !== null) window.clearTimeout(roomJoinTimeout);
+	if (roomHostDepartureTimeout !== null) window.clearTimeout(roomHostDepartureTimeout);
+	if (roomSnapshotBroadcastTimeout !== null) {
+		window.clearTimeout(roomSnapshotBroadcastTimeout);
+	}
+	roomJoinTimeout = null;
+	roomHostDepartureTimeout = null;
+	roomSnapshotBroadcastTimeout = null;
+}
+
+function setRoomMode(nextMode, statusMessage = "") {
+	if (nextMode === "connected" && roomJoinTimeout !== null) {
+		window.clearTimeout(roomJoinTimeout);
+		roomJoinTimeout = null;
+	}
+	roomMode = nextMode;
+	roomStatusMessage = statusMessage;
+	body.dataset.roomMode = nextMode;
+	body.dataset.roomRole = roomRole;
+	updateAvailable.hidden = !(updateReady && nextMode === "local");
+	updateRoomChrome();
+}
+
+function updateRoomChrome() {
+	const total = roomDeviceTotal();
+	roomStatusButton.hidden = roomMode === "local";
+	const visibleTotal = Math.max(1, total);
+	roomDeviceCount.textContent = `${visibleTotal} device${visibleTotal === 1 ? "" : "s"}`;
+	settingsButton.hidden = false;
+	syncSettingsAccess();
+	updateRoomDialog();
+}
+
+function updateRoomDialog() {
+	if (!roomSecret && roomMode === "local") return;
+
+	const total = Math.max(1, roomDeviceTotal());
+	const deviceLabel = `${total} device${total === 1 ? "" : "s"} connected`;
+	roomCode.textContent = roomSecret
+		? `Room ${roomSecret.slice(0, 4).toUpperCase()}`
+		: "Private room";
+	roomShare.hidden = !isRoomHost() || roomMode !== "connected" || !roomLink;
+	roomCopyLink.hidden = !isRoomHost() || roomMode !== "connected" || !roomLink;
+	roomEnter.hidden = roomMode === "error";
+	roomEnter.disabled = roomMode !== "connected";
+
+	if (roomMode === "error") {
+		const hostEndedRoom = roomStatusMessage.includes("closed the room");
+		roomKicker.textContent = "Connection ended";
+		roomTitle.textContent = isRoomHost()
+			? "Room couldn’t start."
+			: hostEndedRoom
+				? "The host left."
+				: "Room couldn’t open.";
+		roomCopy.textContent =
+			roomStatusMessage ||
+			"Return to local play, then create or open a fresh room link.";
+		roomStatusLine.textContent = "Room offline";
+		return;
+	}
+
+	if (roomRole === "host") {
+		roomKicker.textContent = "Your shared room";
+		roomTitle.textContent = roomMode === "joining" ? "Opening the room…" : "Room’s live.";
+		roomCopy.textContent =
+			"Send the invite. Everyone opens it, enters the board, and holds a finger.";
+		roomStatusLine.textContent = roomMode === "joining" ? "Connecting securely" : deviceLabel;
+		roomEnterLabel.textContent = "Go to the board";
+		return;
+	}
+
+	roomKicker.textContent = "Shared chooser";
+	roomTitle.textContent = roomMode === "connected" ? "You’re in." : "Finding the room…";
+	roomCopy.textContent =
+		roomMode === "connected"
+			? "Hold a finger anywhere. Every live touch appears on every screen."
+			: "Keep this page open while we connect you to the host.";
+	roomStatusLine.textContent = roomMode === "connected" ? deviceLabel : "Connecting securely";
+	roomEnterLabel.textContent = "Enter the board";
+}
+
+function showRoomDialog() {
+	updateRoomDialog();
+	if (roomDialog.open) return;
+	if (typeof roomDialog.showModal === "function") roomDialog.showModal();
+	else roomDialog.setAttribute("open", "");
+}
+
+function closeRoomDialog() {
+	if (!roomDialog.open) return;
+	if (typeof roomDialog.close === "function") roomDialog.close();
+	else roomDialog.removeAttribute("open");
+}
+
+async function copyRoomInvite() {
+	if (!roomLink) return;
+	let copied = false;
+	try {
+		await navigator.clipboard.writeText(roomLink);
+		copied = true;
+	} catch {
+		window.prompt("Copy this private room link", roomLink);
+	}
+	if (copied) {
+		const previousLabel = roomCopyLinkLabel.textContent;
+		roomCopyLinkLabel.textContent = "Copied";
+		announce("Room link copied.");
+		window.setTimeout(() => {
+			roomCopyLinkLabel.textContent = previousLabel;
+		}, 1600);
+	}
+}
+
+async function shareRoomInvite() {
+	if (!roomLink) return;
+	if (typeof navigator.share !== "function") {
+		await copyRoomInvite();
+		return;
+	}
+	try {
+		await navigator.share({
+			title: "Join my Chooser room",
+			text: "Open this link, then place a finger on your screen.",
+			url: roomLink,
+		});
+	} catch (error) {
+		if (error?.name !== "AbortError") await copyRoomInvite();
+	}
 }
 
 function setGameState(nextState) {
@@ -141,6 +349,17 @@ function titleCase(value) {
 }
 
 function updateSettingsSummary() {
+	promptSettings.hidden = !settings.promptsEnabled;
+	const guestRoom = isRoomSession() && !isRoomHost();
+
+	if (!settings.promptsEnabled) {
+		activeConfig.textContent = "Chooser only";
+		libraryCount.textContent = guestRoom
+			? "The host controls room prompts · haptics stay personal"
+			: "Kenyan Truth or Dare is off · prompts stay hidden after each pick";
+		return;
+	}
+
 	const modeLabel = settings.mode === "mix" ? "Mix" : titleCase(settings.mode);
 	const categoryLabels = settings.categories.map((category) => CATEGORIES[category].label.replace(" · 18+", ""));
 	const vibeLabel =
@@ -153,10 +372,24 @@ function updateSettingsSummary() {
 		mode: settings.mode,
 		enabledCategories: settings.categories,
 	});
-	libraryCount.textContent = `${selectedCounts.total.toLocaleString()} selected · ${PROMPT_COUNTS.truth.toLocaleString()} truths + ${PROMPT_COUNTS.dare.toLocaleString()} dares offline`;
+	libraryCount.textContent = guestRoom
+		? "The host controls room prompts · haptics stay personal"
+		: `${selectedCounts.total.toLocaleString()} selected · ${PROMPT_COUNTS.truth.toLocaleString()} truths + ${PROMPT_COUNTS.dare.toLocaleString()} dares offline`;
+}
+
+function syncSettingsAccess() {
+	const hostControlled = isRoomSession() && !isRoomHost();
+	promptsToggle.disabled = hostControlled;
+	document
+		.querySelectorAll('input[name="mode"], input[name="category"]')
+		.forEach((input) => {
+			input.disabled = hostControlled;
+		});
 }
 
 function syncSettingsControls() {
+	syncSettingsAccess();
+	promptsToggle.checked = settings.promptsEnabled;
 	document.querySelectorAll('input[name="mode"]').forEach((input) => {
 		input.checked = input.value === settings.mode;
 	});
@@ -168,6 +401,23 @@ function syncSettingsControls() {
 }
 
 function readSettingsControls(changedInput) {
+	if (isRoomSession() && !isRoomHost()) {
+		if (changedInput !== hapticsToggle) {
+			syncSettingsControls();
+			return;
+		}
+		settings = { ...settings, haptics: hapticsToggle.checked };
+		if (localSettingsBeforeRoom) {
+			localSettingsBeforeRoom.haptics = settings.haptics;
+		}
+		if (!settings.haptics && typeof navigator.vibrate === "function") {
+			navigator.vibrate(0);
+		}
+		saveSettings(localSettingsBeforeRoom ?? settings);
+		updateSettingsSummary();
+		return;
+	}
+
 	if (changedInput.value === "naughty" && changedInput.checked) {
 		const confirmed = window.confirm(
 			"Naughty prompts are for consenting adults only. Confirm that you are 18 or older to enable them.",
@@ -182,13 +432,18 @@ function readSettingsControls(changedInput) {
 	const categoryInputs = [...document.querySelectorAll('input[name="category"]')];
 	let categories = categoryInputs.filter((input) => input.checked).map((input) => input.value);
 
-	if (categories.length === 0) {
+	if (categories.length === 0 && changedInput.name === "category") {
 		changedInput.checked = true;
 		categories = [changedInput.value];
 		announce("Keep at least one vibe selected.");
 	}
 
-	settings = { mode, categories, haptics: hapticsToggle.checked };
+	settings = {
+		promptsEnabled: promptsToggle.checked,
+		mode,
+		categories,
+		haptics: hapticsToggle.checked,
+	};
 	if (!settings.haptics && typeof navigator.vibrate === "function") navigator.vibrate(0);
 	saveSettings();
 	updateSettingsSummary();
@@ -233,8 +488,14 @@ function resizeCanvas() {
 	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
 	for (const player of players.values()) {
-		player.x = Math.min(viewport.width, Math.max(0, player.x));
-		player.y = Math.min(viewport.height, Math.max(0, player.y));
+		if (isRoomSession() && Number.isFinite(player.nx) && Number.isFinite(player.ny)) {
+			const point = denormalizePoint(player.nx, player.ny, viewport.width, viewport.height);
+			player.x = point.x;
+			player.y = point.y;
+		} else {
+			player.x = Math.min(viewport.width, Math.max(0, player.x));
+			player.y = Math.min(viewport.height, Math.max(0, player.y));
+		}
 	}
 	requestRender();
 }
@@ -250,6 +511,519 @@ function identityName(player, style = roundIdentityStyle) {
 	if (style === "numbers") return `Player ${player.slot + 1}`;
 	const shape = SHAPES[player.slot % SHAPES.length];
 	return `${shape.name} player`;
+}
+
+function cryptoRandomIndex(length) {
+	if (!Number.isInteger(length) || length < 1) return 0;
+	const limit = Math.floor(0x100000000 / length) * length;
+	const random = new Uint32Array(1);
+	do crypto.getRandomValues(random);
+	while (random[0] >= limit);
+	return random[0] % length;
+}
+
+function serializeRoomPlayer(player) {
+	const normalized =
+		Number.isFinite(player.nx) && Number.isFinite(player.ny)
+			? { nx: player.nx, ny: player.ny }
+			: normalizePoint(player.x, player.y, viewport.width, viewport.height);
+	return {
+		id: String(player.pointerId),
+		clientId: String(player.clientId ?? roomTransport?.selfId ?? "local"),
+		slot: player.slot,
+		nx: normalized.nx,
+		ny: normalized.ny,
+	};
+}
+
+function serializeRoomResult() {
+	if (!result) return null;
+	return {
+		winner: serializeRoomPlayer(result.winner),
+		identityStyle: result.identityStyle,
+		prompt: result.prompt
+			? {
+					mode: result.prompt.mode,
+					category: result.prompt.category,
+					text: result.prompt.text,
+				}
+			: null,
+	};
+}
+
+function buildRoomSnapshot() {
+	const now = performance.now();
+	return {
+		version: ROOM_PROTOCOL_VERSION,
+		kind: "snapshot",
+		sequence: ++roomStateSequence,
+		hostPeerId: roomTransport?.selfId ?? roomHostPeerId,
+		phase: gameState,
+		round: roomRound,
+		completedRounds,
+		identityStyle: roundIdentityStyle,
+		countdownRemainingMs:
+			gameState === "countdown" ? Math.max(0, countdownDeadline - now) : 0,
+		revealElapsedMs:
+			gameState === "reveal" ? Math.max(0, now - revealStartedAt) : 0,
+		players: [...players.values()].map(serializeRoomPlayer),
+		activeFingerIds: [...roomActiveFingerIds],
+		settings: {
+			promptsEnabled: settings.promptsEnabled,
+			mode: settings.mode,
+			categories: [...settings.categories],
+			haptics: settings.haptics,
+		},
+		result: serializeRoomResult(),
+	};
+}
+
+function broadcastRoomSnapshot(target = null) {
+	if (!isRoomConnected() || !isRoomHost()) return;
+	if (target === null) {
+		if (roomSnapshotBroadcastTimeout !== null) {
+			window.clearTimeout(roomSnapshotBroadcastTimeout);
+			roomSnapshotBroadcastTimeout = null;
+		}
+		roomLastSnapshotBroadcastAt = performance.now();
+	}
+	roomTransport.sendState(buildRoomSnapshot(), target).catch((error) => {
+		console.warn("Room state could not be sent:", error);
+	});
+}
+
+function queueRoomSnapshotBroadcast() {
+	if (!isRoomConnected() || !isRoomHost() || roomSnapshotBroadcastTimeout !== null) return;
+	const delay = Math.max(
+		0,
+		ROOM_STATE_BROADCAST_INTERVAL_MS -
+			(performance.now() - roomLastSnapshotBroadcastAt),
+	);
+	if (delay === 0) {
+		broadcastRoomSnapshot();
+		return;
+	}
+	roomSnapshotBroadcastTimeout = window.setTimeout(() => {
+		roomSnapshotBroadcastTimeout = null;
+		broadcastRoomSnapshot();
+	}, delay);
+}
+
+function sanitizeRoomSettings(value) {
+	if (!value || typeof value !== "object") return null;
+	const mode = ["truth", "dare", "mix"].includes(value.mode) ? value.mode : null;
+	const categories = Array.isArray(value.categories)
+		? [...new Set(value.categories)].filter((category) => CATEGORIES[category])
+		: [];
+	if (!mode || categories.length === 0) return null;
+	return {
+		promptsEnabled: value.promptsEnabled === true,
+		mode,
+		categories,
+		haptics: value.haptics !== false,
+	};
+}
+
+function sanitizeRoomPlayer(value) {
+	if (!value || typeof value !== "object") return null;
+	if (
+		typeof value.id !== "string" ||
+		value.id.length < 3 ||
+		value.id.length > 96 ||
+		typeof value.clientId !== "string" ||
+		value.clientId.length < 3 ||
+		value.clientId.length > 64 ||
+		!value.id.startsWith(`${value.clientId}:`) ||
+		!Number.isInteger(value.slot) ||
+		value.slot < 0 ||
+		value.slot >= MAX_ROOM_PLAYERS ||
+		!Number.isFinite(value.nx) ||
+		!Number.isFinite(value.ny) ||
+		value.nx < 0 ||
+		value.nx > 1 ||
+		value.ny < 0 ||
+		value.ny > 1
+	) {
+		return null;
+	}
+	const point = denormalizePoint(value.nx, value.ny, viewport.width, viewport.height);
+	return {
+		pointerId: value.id,
+		clientId: value.clientId,
+		slot: value.slot,
+		nx: value.nx,
+		ny: value.ny,
+		x: point.x,
+		y: point.y,
+	};
+}
+
+function sanitizeRoomPrompt(value) {
+	if (value === null) return null;
+	if (
+		!value ||
+		typeof value !== "object" ||
+		!["truth", "dare"].includes(value.mode) ||
+		!CATEGORIES[value.category] ||
+		typeof value.text !== "string" ||
+		value.text.length < 1 ||
+		value.text.length > 500
+	) {
+		return undefined;
+	}
+	return Object.freeze({
+		mode: value.mode,
+		category: value.category,
+		text: value.text,
+	});
+}
+
+function sanitizeRoomResult(value, roomPlayers) {
+	if (value === null) return null;
+	if (!value || typeof value !== "object") return undefined;
+	const winner = sanitizeRoomPlayer(value.winner);
+	const prompt = sanitizeRoomPrompt(value.prompt);
+	const identityStyle = ["numbers", "shapes"].includes(value.identityStyle)
+		? value.identityStyle
+		: null;
+	if (!winner || prompt === undefined || !identityStyle || !roomPlayers.has(winner.pointerId)) {
+		return undefined;
+	}
+	return { winner, identityStyle, prompt };
+}
+
+function applyRoomSnapshot(payload, peerId) {
+	if (
+		isRoomHost() ||
+		!payload ||
+		typeof payload !== "object" ||
+		payload.version !== ROOM_PROTOCOL_VERSION ||
+		payload.kind !== "snapshot" ||
+		payload.hostPeerId !== peerId ||
+		(roomHostPeerId && roomHostPeerId !== peerId) ||
+		!Number.isInteger(payload.sequence) ||
+		payload.sequence <= lastAppliedRoomSequence ||
+		!["idle", "collecting", "countdown", "reveal", "result"].includes(payload.phase) ||
+		!["numbers", "shapes"].includes(payload.identityStyle) ||
+		!Array.isArray(payload.players) ||
+		payload.players.length > MAX_ROOM_PLAYERS ||
+		!Array.isArray(payload.activeFingerIds) ||
+		payload.activeFingerIds.length > MAX_ROOM_PLAYERS
+	) {
+		return;
+	}
+
+	const nextPlayers = new Map();
+	const usedSlots = new Set();
+	for (const value of payload.players) {
+		const player = sanitizeRoomPlayer(value);
+		if (!player || nextPlayers.has(player.pointerId) || usedSlots.has(player.slot)) return;
+		nextPlayers.set(player.pointerId, player);
+		usedSlots.add(player.slot);
+	}
+
+	const nextActiveIds = new Set();
+	for (const id of payload.activeFingerIds) {
+		if (typeof id !== "string" || !nextPlayers.has(id)) return;
+		nextActiveIds.add(id);
+	}
+
+	const nextSettings = sanitizeRoomSettings(payload.settings);
+	const nextResult = sanitizeRoomResult(payload.result, nextPlayers);
+	if (!nextSettings || nextResult === undefined) return;
+	if (["reveal", "result"].includes(payload.phase) && !nextResult) return;
+	nextSettings.haptics = settings.haptics;
+
+	const previousPhase = gameState;
+	roomHostPeerId = peerId;
+	lastAppliedRoomSequence = payload.sequence;
+	roomRound = Number.isInteger(payload.round) && payload.round >= 0 ? payload.round : roomRound;
+	completedRounds =
+		Number.isInteger(payload.completedRounds) && payload.completedRounds >= 0
+			? payload.completedRounds
+			: completedRounds;
+	roundIdentityStyle = payload.identityStyle;
+	body.dataset.identityStyle = roundIdentityStyle;
+	players.clear();
+	for (const [id, player] of nextPlayers) players.set(id, player);
+	roomActiveFingerIds.clear();
+	for (const id of nextActiveIds) roomActiveFingerIds.add(id);
+	settings = nextSettings;
+	result = nextResult;
+
+	const now = performance.now();
+	if (payload.phase === "countdown") {
+		const remaining = Math.max(
+			0,
+			Math.min(CHOOSE_DELAY_MS, Number(payload.countdownRemainingMs) || 0),
+		);
+		countdownDeadline = now + remaining;
+		countdownStartedAt = countdownDeadline - CHOOSE_DELAY_MS;
+	} else {
+		countdownDeadline = 0;
+		countdownStartedAt = 0;
+	}
+	if (payload.phase === "reveal") {
+		const elapsed = Math.max(
+			0,
+			Math.min(WINNER_DISPLAY_DURATION_MS, Number(payload.revealElapsedMs) || 0),
+		);
+		revealStartedAt = now - elapsed;
+	} else revealStartedAt = 0;
+
+	if (result) {
+		updateResultContent();
+		document.documentElement.style.setProperty("--accent", playerColor(result.winner.slot));
+		body.dataset.winnerDevice = String(result.winner.clientId === roomTransport?.selfId);
+	} else {
+		body.dataset.winnerDevice = "false";
+		document.documentElement.style.setProperty("--accent", DEFAULT_ACCENT);
+	}
+
+	setGameState(payload.phase);
+	buildConnectorTopology();
+	updateSettingsSummary();
+	updateNextRoundAvailability();
+	setRoomMode("connected");
+	requestRender();
+
+	if (previousPhase !== "reveal" && payload.phase === "reveal" && result) {
+		const winnerName = identityName(result.winner, result.identityStyle);
+		safeVibrate(result.winner.clientId === roomTransport?.selfId ? [35, 25, 70] : 20);
+		announce(
+			result.winner.clientId === roomTransport?.selfId
+				? `You were chosen as ${winnerName}.`
+				: `${winnerName} was chosen on another phone.`,
+		);
+	}
+}
+
+function removePeerFingers(peerId) {
+	let changed = false;
+	for (const [id, player] of players) {
+		if (player.clientId !== peerId) continue;
+		roomActiveFingerIds.delete(id);
+		roomIntentSequences.delete(id);
+		roomLastMoveReceivedAt.delete(id);
+		if (!["reveal", "result"].includes(gameState)) players.delete(id);
+		changed = true;
+	}
+	return changed;
+}
+
+function handleRoomPeerLeave(peerId, connectionAttempt) {
+	roomPeerIds.delete(peerId);
+	updateRoomChrome();
+
+	if (isRoomHost()) {
+		if (removePeerFingers(peerId)) {
+			if (!["reveal", "result"].includes(gameState)) updateStateForPlayers();
+			else updateNextRoundAvailability();
+		}
+		broadcastRoomSnapshot();
+		return;
+	}
+
+	if (peerId === roomHostPeerId) {
+		if (roomHostDepartureTimeout !== null) {
+			window.clearTimeout(roomHostDepartureTimeout);
+		}
+		setRoomMode("joining", "Reconnecting to the room host.");
+		showRoomDialog();
+		roomHostDepartureTimeout = window.setTimeout(() => {
+			roomHostDepartureTimeout = null;
+			if (
+				connectionAttempt !== roomConnectionAttempt ||
+				roomPeerIds.has(roomHostPeerId)
+			) {
+				return;
+			}
+			roomConnectionAttempt += 1;
+			roomTransport?.leave();
+			roomTransport = null;
+			roomPeerIds.clear();
+			setRoomMode(
+				"error",
+				"The link creator closed the room. Return to local play and start a fresh one.",
+			);
+			showRoomDialog();
+		}, ROOM_HOST_RECONNECT_GRACE_MS);
+	}
+}
+
+async function connectSharedRoom(secret, role, expectedHostId = null) {
+	const connectionAttempt = ++roomConnectionAttempt;
+	clearRoomConnectionTimers();
+	roomSecret = secret;
+	roomRole = role;
+	roomHostPeerId = role === "guest" ? expectedHostId : null;
+	roomStateSequence = 0;
+	lastAppliedRoomSequence = 0;
+	roomPeerIds.clear();
+	roomLink =
+		role === "guest" && expectedHostId
+			? makeRoomUrl(secret, expectedHostId, window.location.href)
+			: "";
+	localSettingsBeforeRoom = role === "guest" ? { ...settings, categories: [...settings.categories] } : null;
+	body.dataset.winnerDevice = "false";
+	setRoomMode("joining");
+	showRoomDialog();
+	if (role === "guest") {
+		roomJoinTimeout = window.setTimeout(() => {
+			roomJoinTimeout = null;
+			if (
+				connectionAttempt !== roomConnectionAttempt ||
+				roomMode === "connected"
+			) {
+				return;
+			}
+			roomConnectionAttempt += 1;
+			roomTransport?.leave();
+			roomTransport = null;
+			roomPeerIds.clear();
+			setRoomMode(
+				"error",
+				"We couldn’t find the room host. Ask them to create and share a fresh link.",
+			);
+			showRoomDialog();
+		}, ROOM_JOIN_TIMEOUT_MS);
+	}
+
+	try {
+		const transport = await connectRoom({
+			secret,
+			onPeerJoin(peerId) {
+				if (connectionAttempt !== roomConnectionAttempt) return;
+				roomPeerIds.add(peerId);
+				if (peerId === roomHostPeerId && roomHostDepartureTimeout !== null) {
+					window.clearTimeout(roomHostDepartureTimeout);
+					roomHostDepartureTimeout = null;
+				}
+				updateRoomChrome();
+				if (isRoomHost()) window.queueMicrotask(() => broadcastRoomSnapshot(peerId));
+			},
+			onPeerLeave(peerId) {
+				if (connectionAttempt === roomConnectionAttempt) {
+					handleRoomPeerLeave(peerId, connectionAttempt);
+				}
+			},
+			onState(payload, peerId) {
+				if (connectionAttempt === roomConnectionAttempt) applyRoomSnapshot(payload, peerId);
+			},
+			onIntent(payload, peerId) {
+				if (connectionAttempt !== roomConnectionAttempt || !isRoomHost()) return;
+				const intent = sanitizeFingerIntent(payload, peerId);
+				if (intent) handleRoomFingerIntent(intent, peerId);
+			},
+			onError(details) {
+				if (connectionAttempt !== roomConnectionAttempt) return;
+				const message = typeof details?.error === "string" ? details.error : "Peer connection failed.";
+				console.warn("Chooser room connection warning:", message);
+				if (
+					!isRoomHost() &&
+					roomMode !== "connected" &&
+					(!details?.peerId || details.peerId === roomHostPeerId)
+				) {
+					roomConnectionAttempt += 1;
+					clearRoomConnectionTimers();
+					roomTransport?.leave();
+					roomTransport = null;
+					roomPeerIds.clear();
+					setRoomMode("error", "We couldn’t reach this room. Ask the host for a fresh link and try again.");
+					showRoomDialog();
+				}
+			},
+		});
+
+		if (
+			connectionAttempt !== roomConnectionAttempt ||
+			roomSecret !== secret ||
+			["local", "error"].includes(roomMode)
+		) {
+			transport.leave();
+			return;
+		}
+
+		roomTransport = transport;
+		for (const peerId of transport.getPeerIds()) roomPeerIds.add(peerId);
+		if (isRoomHost()) {
+			roomHostPeerId = transport.selfId;
+			roomLink = makeRoomUrl(secret, transport.selfId, window.location.href);
+			replaceLocationWithRoom(secret, transport.selfId);
+			setRoomMode("connected");
+			broadcastRoomSnapshot();
+		} else updateRoomChrome();
+	} catch (error) {
+		if (connectionAttempt !== roomConnectionAttempt) return;
+		console.error("Shared room could not start:", error);
+		roomConnectionAttempt += 1;
+		clearRoomConnectionTimers();
+		setRoomMode(
+			"error",
+			"The secure room service is unavailable right now. Local chooser still works offline.",
+		);
+		showRoomDialog();
+	}
+}
+
+function replaceLocationWithRoom(secret, hostId) {
+	const nextUrl = new URL(makeRoomUrl(secret, hostId, window.location.href));
+	history.replaceState(null, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+}
+
+function createSharedRoom() {
+	if (roomMode !== "local") return;
+	const secret = createRoomSecret();
+	prepareNextRound({ broadcast: false });
+	void connectSharedRoom(secret, "host");
+}
+
+function restoreLocalSettings() {
+	if (!localSettingsBeforeRoom) return;
+	settings = localSettingsBeforeRoom;
+	localSettingsBeforeRoom = null;
+	syncSettingsControls();
+}
+
+function leaveSharedRoom() {
+	if (roomMode === "local") return;
+	roomConnectionAttempt += 1;
+	clearRoomConnectionTimers();
+	roomTransport?.leave();
+	roomTransport = null;
+	roomPeerIds.clear();
+	localRoomFingerIds.clear();
+	roomActiveFingerIds.clear();
+	roomIntentSequences.clear();
+	roomOutgoingSequences.clear();
+	roomLastMoveSentAt.clear();
+	roomLastMoveReceivedAt.clear();
+	physicalPointers.clear();
+	roomSecret = null;
+	roomLink = "";
+	roomHostPeerId = null;
+	roomRole = "guest";
+	roomStateSequence = 0;
+	lastAppliedRoomSequence = 0;
+	restoreLocalSettings();
+	history.replaceState(null, "", `${location.pathname}${location.search}`);
+	closeRoomDialog();
+	prepareNextRound({ broadcast: false });
+	setRoomMode("local");
+	announce("Shared room closed. Local chooser is ready.");
+}
+
+function initializeRoomFromLocation() {
+	const invite = parseRoomHash(window.location.hash);
+	if (invite) {
+		void connectSharedRoom(invite.secret, "guest", invite.hostId);
+		return;
+	}
+	if (window.location.hash.startsWith("#room=")) {
+		roomRole = "guest";
+		setRoomMode("error", "This invite link is incomplete or invalid. Ask the host to share it again.");
+		showRoomDialog();
+	}
 }
 
 function buildConnectorTopology() {
@@ -308,6 +1082,7 @@ function buildConnectorTopology() {
 }
 
 function beginCountdown(now = performance.now()) {
+	if (isRoomHost() && gameState !== "countdown") roomRound += 1;
 	countdownStartedAt = now;
 	countdownDeadline = now + CHOOSE_DELAY_MS;
 	hapticMilestonesFired = 0;
@@ -317,6 +1092,10 @@ function beginCountdown(now = performance.now()) {
 
 function updateStateForPlayers(now = performance.now()) {
 	buildConnectorTopology();
+	if (isRoomSession() && !isRoomHost()) {
+		requestRender();
+		return;
+	}
 	if (players.size >= MIN_PLAYERS) {
 		beginCountdown(now);
 	} else if (players.size === 1) {
@@ -360,6 +1139,67 @@ function removePlayer(event) {
 	players.delete(event.pointerId);
 	announce(`${identityName(player)} disconnected.`);
 	updateStateForPlayers();
+}
+
+function handleRoomFingerIntent(intent, peerId) {
+	if (!isRoomHost() || peerId !== intent.id.split(":", 1)[0]) return;
+	const existing = players.get(intent.id);
+	if (intent.type === "down") {
+		if (["reveal", "result"].includes(gameState) || existing) return;
+		const previousSequence = roomIntentSequences.get(intent.id) ?? -1;
+		if (intent.seq <= previousSequence) return;
+		if (!existing && players.size >= MAX_ROOM_PLAYERS) return;
+		roomIntentSequences.set(intent.id, intent.seq);
+		const point = denormalizePoint(intent.nx, intent.ny, viewport.width, viewport.height);
+		const player = {
+			pointerId: intent.id,
+			clientId: peerId,
+			slot: availableSlot(),
+		};
+		player.nx = intent.nx;
+		player.ny = intent.ny;
+		player.x = point.x;
+		player.y = point.y;
+		players.set(intent.id, player);
+		roomActiveFingerIds.add(intent.id);
+		updateStateForPlayers();
+		broadcastRoomSnapshot();
+		return;
+	}
+
+	if (!existing || existing.clientId !== peerId) return;
+	const previousSequence = roomIntentSequences.get(intent.id) ?? -1;
+	if (intent.seq <= previousSequence) return;
+	roomIntentSequences.set(intent.id, intent.seq);
+	if (intent.type === "move") {
+		if (!roomActiveFingerIds.has(intent.id) || ["reveal", "result"].includes(gameState)) return;
+		const receivedAt = performance.now();
+		if (
+			receivedAt - (roomLastMoveReceivedAt.get(intent.id) ?? 0) <
+			ROOM_RECEIVE_MOVE_INTERVAL_MS
+		) {
+			return;
+		}
+		roomLastMoveReceivedAt.set(intent.id, receivedAt);
+		const point = denormalizePoint(intent.nx, intent.ny, viewport.width, viewport.height);
+		existing.nx = intent.nx;
+		existing.ny = intent.ny;
+		existing.x = point.x;
+		existing.y = point.y;
+		buildConnectorTopology();
+		requestRender();
+		queueRoomSnapshotBroadcast();
+		return;
+	}
+
+	roomActiveFingerIds.delete(intent.id);
+	roomIntentSequences.delete(intent.id);
+	roomLastMoveReceivedAt.delete(intent.id);
+	if (!["reveal", "result"].includes(gameState)) {
+		players.delete(intent.id);
+		updateStateForPlayers();
+	} else updateNextRoundAvailability();
+	broadcastRoomSnapshot();
 }
 
 function polygonPath(sides, radius, rotation) {
@@ -648,7 +1488,36 @@ function farthestCornerRadius(x, y) {
 	);
 }
 
+function isWinnerDevice() {
+	return !isRoomSession() || result?.winner.clientId === roomTransport?.selfId;
+}
+
+function drawObserverReveal(now) {
+	const progress = Math.min(
+		1,
+		Math.max(0, (now - revealStartedAt) / REVEAL_ANIMATION_DURATION_MS),
+	);
+	const eased = easeOutQuint(progress);
+	const winnerId = result.winner.pointerId;
+	ctx.fillStyle = "#050608";
+	ctx.fillRect(0, 0, viewport.width, viewport.height);
+	drawConnectors(now, Math.max(0, 1 - progress * 1.4));
+	for (const player of players.values()) {
+		const isWinner = player.pointerId === winnerId;
+		drawPlayer(
+			player,
+			1,
+			isWinner ? 1 : Math.max(0.12, 1 - progress * 1.25),
+			isWinner ? 1 + eased * 0.32 : 1,
+		);
+	}
+}
+
 function drawReveal(now) {
+	if (!isWinnerDevice()) {
+		drawObserverReveal(now);
+		return;
+	}
 	const progress = Math.min(
 		1,
 		(now - revealStartedAt) / REVEAL_ANIMATION_DURATION_MS,
@@ -679,6 +1548,19 @@ function drawReveal(now) {
 	);
 	ctx.fill();
 	ctx.restore();
+	if (result.identityStyle === "shapes") {
+		ctx.save();
+		ctx.translate(winner.x, winner.y);
+		ctx.beginPath();
+		shapePath(
+			SHAPES[winner.slot % SHAPES.length],
+			Math.max(1, farthestCornerRadius(winner.x, winner.y) * eased * 1.45),
+		);
+		ctx.globalAlpha = 0.34;
+		ctx.fillStyle = `hsl(${hue} 82% 22%)`;
+		ctx.fill();
+		ctx.restore();
+	}
 
 	drawPlayer(winner, 1, 1, 1 + eased * 0.34);
 }
@@ -716,6 +1598,16 @@ function drawWinnerWatermark() {
 function drawResult() {
 	const winner = result.winner;
 	const hue = playerHue(winner.slot);
+	if (!isWinnerDevice()) {
+		ctx.fillStyle = "#050608";
+		ctx.fillRect(0, 0, viewport.width, viewport.height);
+		const currentWinner = players.get(winner.pointerId) ?? winner;
+		for (const player of players.values()) {
+			if (player.pointerId !== winner.pointerId) drawPlayer(player, 1, 0.1, 1);
+		}
+		drawPlayer(currentWinner, 1, 1, 1.28);
+		return;
+	}
 	const radius = Math.max(viewport.width, viewport.height) * 0.78;
 	const gradient = ctx.createRadialGradient(
 		winner.x,
@@ -744,38 +1636,69 @@ function maybePlayCountdownHaptic(now) {
 	safeVibrate(7);
 }
 
+function updateResultContent() {
+	if (!result) return;
+	const winnerName = identityName(result.winner, result.identityStyle);
+	const winnerDevice = isWinnerDevice();
+	if (result.prompt) {
+		const ownerLabel =
+			isRoomSession() && winnerDevice
+				? "You’re chosen"
+				: winnerName;
+		resultMeta.textContent = `${ownerLabel} · ${result.prompt.mode} · ${CATEGORIES[result.prompt.category].label}`;
+		resultPrompt.textContent = result.prompt.text;
+		resultPrompt.classList.toggle("long-prompt", result.prompt.text.length > 135);
+		resultPrompt.classList.toggle("very-long-prompt", result.prompt.text.length > 190);
+		return;
+	}
+	resultMeta.textContent =
+		isRoomSession() && winnerDevice
+			? "You’re chosen"
+			: isRoomSession()
+				? "Chosen on another phone"
+				: "Chosen";
+	resultPrompt.textContent = winnerName;
+	resultPrompt.classList.remove("long-prompt", "very-long-prompt");
+}
+
 function commitResult(now) {
 	if (gameState !== "countdown" || players.size < MIN_PLAYERS) return;
+	if (isRoomSession() && !isRoomHost()) return;
 	const candidates = [...players.values()];
-	const winner = candidates[Math.floor(Math.random() * candidates.length)];
-	const prompt = promptPicker.pick({
-		mode: settings.mode,
-		enabledCategories: settings.categories,
-	});
+	const winner = candidates[cryptoRandomIndex(candidates.length)];
+	const prompt = settings.promptsEnabled
+		? promptPicker.pick({
+				mode: settings.mode,
+				enabledCategories: settings.categories,
+			}) ??
+			Object.freeze({
+				mode: "truth",
+				category: "neutral",
+				text: "Which Kenyan moment made you smile today?",
+			})
+		: null;
 	const frozenWinner = { ...winner };
 
 	result = {
 		winner: frozenWinner,
 		identityStyle: roundIdentityStyle,
-		prompt:
-			prompt ??
-			Object.freeze({
-				mode: "truth",
-				category: "neutral",
-				text: "What made you smile today?",
-			}),
+		prompt,
 	};
 	completedRounds += 1;
 	revealStartedAt = now;
-	resultMeta.textContent = `${identityName(frozenWinner, result.identityStyle)} · ${result.prompt.mode} · ${CATEGORIES[result.prompt.category].label}`;
-	resultPrompt.textContent = result.prompt.text;
-	resultPrompt.classList.toggle("long-prompt", result.prompt.text.length > 135);
-	resultPrompt.classList.toggle("very-long-prompt", result.prompt.text.length > 190);
+	const winnerName = identityName(frozenWinner, result.identityStyle);
+	body.dataset.winnerDevice = String(isWinnerDevice());
+	updateResultContent();
 	document.documentElement.style.setProperty("--accent", playerColor(winner.slot));
 	setGameState("reveal");
 	updateNextRoundAvailability();
-	safeVibrate([35, 25, 70]);
-	announce(`${identityName(frozenWinner, result.identityStyle)} was chosen. ${titleCase(result.prompt.mode)}: ${result.prompt.text}`);
+	safeVibrate(isWinnerDevice() ? [35, 25, 70] : 20);
+	broadcastRoomSnapshot();
+	announce(
+		result.prompt
+			? `${winnerName} was chosen. ${titleCase(result.prompt.mode)}: ${result.prompt.text}`
+			: `${winnerName} was chosen.`,
+	);
 }
 
 function updateCountdownText(now) {
@@ -805,6 +1728,7 @@ function render(now) {
 			setGameState("result");
 			updateNextRoundAvailability();
 			drawResult();
+			broadcastRoomSnapshot();
 		} else drawReveal(now);
 	} else if (gameState === "result") {
 		drawResult();
@@ -818,9 +1742,15 @@ function resetGesture() {
 	previousChord = null;
 }
 
-function prepareNextRound() {
+function prepareNextRound({ broadcast = isRoomConnected() && isRoomHost() } = {}) {
 	players.clear();
 	physicalPointers.clear();
+	localRoomFingerIds.clear();
+	roomActiveFingerIds.clear();
+	roomIntentSequences.clear();
+	roomOutgoingSequences.clear();
+	roomLastMoveSentAt.clear();
+	roomLastMoveReceivedAt.clear();
 	connectorEdges = [];
 	connectorRoute = [];
 	countdownStartedAt = 0;
@@ -833,15 +1763,26 @@ function prepareNextRound() {
 	collectingPanel.dataset.connectorCount = "0";
 	collectingPanel.dataset.travelingDotCount = "0";
 	document.documentElement.style.setProperty("--accent", DEFAULT_ACCENT);
+	body.dataset.winnerDevice = "false";
 	resetGesture();
 	setGameState("idle");
 	requestRender();
+	if (broadcast) broadcastRoomSnapshot();
 }
 
 function updateNextRoundAvailability() {
-	const waiting = physicalPointers.size > 0;
+	if (isRoomSession() && !isRoomHost()) {
+		nextRoundButton.disabled = true;
+		nextRoundLabel.textContent = "Host starts next";
+		return;
+	}
+	const waiting = isRoomHost() ? roomActiveFingerIds.size > 0 : physicalPointers.size > 0;
 	nextRoundButton.disabled = waiting;
-	nextRoundLabel.textContent = waiting ? "Lift fingers" : "Next round";
+	nextRoundLabel.textContent = waiting
+		? isRoomHost()
+			? "Everyone lifts"
+			: "Lift fingers"
+		: "Next round";
 }
 
 function chordPositionsMatch(first, second) {
@@ -942,8 +1883,93 @@ function trackGestureUp(event, cancelled = false) {
 	return false;
 }
 
+function nextRoomIntent(pointerId, type, point = null) {
+	const fingerId = localRoomFingerIds.get(pointerId);
+	if (!fingerId) return null;
+	const seq = (roomOutgoingSequences.get(fingerId) ?? 0) + 1;
+	roomOutgoingSequences.set(fingerId, seq);
+	return {
+		type,
+		id: fingerId,
+		seq,
+		...(point ? { nx: point.nx, ny: point.ny } : {}),
+	};
+}
+
+function dispatchRoomIntent(intent) {
+	if (!intent || !isRoomConnected()) return;
+	if (isRoomHost()) {
+		handleRoomFingerIntent(intent, roomTransport.selfId);
+		return;
+	}
+	if (!roomHostPeerId) return;
+	roomTransport.sendIntent(intent, roomHostPeerId).catch((error) => {
+		console.warn("Finger update could not be sent:", error);
+	});
+}
+
+function addOptimisticRoomFinger(intent) {
+	if (players.has(intent.id) || players.size >= MAX_ROOM_PLAYERS) return;
+	const point = denormalizePoint(intent.nx, intent.ny, viewport.width, viewport.height);
+	players.set(intent.id, {
+		pointerId: intent.id,
+		clientId: roomTransport.selfId,
+		slot: availableSlot(),
+		nx: intent.nx,
+		ny: intent.ny,
+		x: point.x,
+		y: point.y,
+	});
+	roomActiveFingerIds.add(intent.id);
+	buildConnectorTopology();
+	if (gameState === "idle") setGameState("collecting");
+	requestRender();
+}
+
+function releaseRoomFinger(pointerId) {
+	const fingerId = localRoomFingerIds.get(pointerId);
+	if (!fingerId) return;
+	const intent = nextRoomIntent(pointerId, "up");
+	localRoomFingerIds.delete(pointerId);
+	roomLastMoveSentAt.delete(pointerId);
+	if (!isRoomHost()) {
+		roomActiveFingerIds.delete(fingerId);
+		if (!["reveal", "result"].includes(gameState)) {
+			players.delete(fingerId);
+			updateStateForPlayers();
+		} else updateNextRoundAvailability();
+	}
+	dispatchRoomIntent(intent);
+}
+
+function releaseAllLocalRoomFingers() {
+	for (const pointerId of [...localRoomFingerIds.keys()]) releaseRoomFinger(pointerId);
+	physicalPointers.clear();
+}
+
 function onPointerDown(event) {
 	if (settingsDialog.open || gameState === "reveal") return;
+	if (isRoomSession()) {
+		if (!isRoomConnected() || roomDialog.open || ["reveal", "result"].includes(gameState)) return;
+		event.preventDefault();
+		if (players.size >= MAX_ROOM_PLAYERS) {
+			announce(`This room supports up to ${MAX_ROOM_PLAYERS} fingers.`);
+			return;
+		}
+		physicalPointers.add(event.pointerId);
+		try {
+			canvas.setPointerCapture(event.pointerId);
+		} catch {
+			// Synthetic pointers and a few older browsers cannot be captured.
+		}
+		const fingerId = `${roomTransport.selfId}:${event.pointerId}`;
+		localRoomFingerIds.set(event.pointerId, fingerId);
+		const point = normalizePoint(event.clientX, event.clientY, viewport.width, viewport.height);
+		const intent = nextRoomIntent(event.pointerId, "down", point);
+		if (!isRoomHost()) addOptimisticRoomFinger(intent);
+		dispatchRoomIntent(intent);
+		return;
+	}
 	event.preventDefault();
 
 	if (gameState === "result") {
@@ -962,6 +1988,25 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
+	if (isRoomSession()) {
+		const fingerId = localRoomFingerIds.get(event.pointerId);
+		const player = fingerId ? players.get(fingerId) : null;
+		if (!player || !roomActiveFingerIds.has(fingerId)) return;
+		const point = normalizePoint(event.clientX, event.clientY, viewport.width, viewport.height);
+		const localPoint = denormalizePoint(point.nx, point.ny, viewport.width, viewport.height);
+		player.nx = point.nx;
+		player.ny = point.ny;
+		player.x = localPoint.x;
+		player.y = localPoint.y;
+		buildConnectorTopology();
+		requestRender();
+
+		const now = performance.now();
+		if (now - (roomLastMoveSentAt.get(event.pointerId) ?? 0) < ROOM_MOVE_INTERVAL_MS) return;
+		roomLastMoveSentAt.set(event.pointerId, now);
+		dispatchRoomIntent(nextRoomIntent(event.pointerId, "move", point));
+		return;
+	}
 	trackGestureMove(event);
 	updatePlayer(event);
 }
@@ -972,6 +2017,10 @@ function onPointerEnd(event, cancelled = false) {
 		if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
 	} catch {
 		// Ignore unsupported or already-released pointer capture.
+	}
+	if (isRoomSession()) {
+		releaseRoomFinger(event.pointerId);
+		return;
 	}
 
 	if (["reveal", "result"].includes(gameState)) {
@@ -984,6 +2033,10 @@ function onPointerEnd(event, cancelled = false) {
 }
 
 function clearInterruptedRound() {
+	if (isRoomSession()) {
+		releaseAllLocalRoomFingers();
+		return;
+	}
 	if (gameState === "reveal") {
 		physicalPointers.clear();
 		setGameState("result");
@@ -996,7 +2049,8 @@ function clearInterruptedRound() {
 
 function openSettings(source = "button") {
 	if (settingsDialog.open) return;
-	prepareNextRound();
+	if (isRoomSession() && !isRoomHost()) releaseAllLocalRoomFingers();
+	else prepareNextRound();
 	syncSettingsControls();
 	if (typeof settingsDialog.showModal === "function") settingsDialog.showModal();
 	else settingsDialog.setAttribute("open", "");
@@ -1020,7 +2074,34 @@ canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 settingsButton.addEventListener("click", () => openSettings("button"));
 settingsClose.addEventListener("click", closeSettings);
 nextRoundButton.addEventListener("click", () => {
-	if (physicalPointers.size === 0) prepareNextRound();
+	const ready = isRoomHost()
+		? roomActiveFingerIds.size === 0
+		: physicalPointers.size === 0;
+	if (ready) prepareNextRound();
+});
+
+roomEntryButton.addEventListener("click", createSharedRoom);
+roomStatusButton.addEventListener("click", showRoomDialog);
+roomShare.addEventListener("click", () => void shareRoomInvite());
+roomCopyLink.addEventListener("click", () => void copyRoomInvite());
+roomEnter.addEventListener("click", () => {
+	if (roomMode === "connected") closeRoomDialog();
+});
+roomLeave.addEventListener("click", leaveSharedRoom);
+roomClose.addEventListener("click", () => {
+	if (roomMode === "error" || roomMode === "joining") leaveSharedRoom();
+	else closeRoomDialog();
+});
+roomDialog.addEventListener("cancel", (event) => {
+	event.preventDefault();
+	if (roomMode === "error" || roomMode === "joining") leaveSharedRoom();
+	else closeRoomDialog();
+});
+
+updateLink.addEventListener("click", (event) => {
+	event.preventDefault();
+	if (roomMode !== "local") return;
+	window.location.reload();
 });
 
 settingsDialog.addEventListener("click", (event) => {
@@ -1028,17 +2109,24 @@ settingsDialog.addEventListener("click", (event) => {
 });
 settingsDialog.addEventListener("close", () => {
 	delete body.dataset.settingsOpenedBy;
+	if (isRoomSession() && !isRoomHost()) {
+		requestRender();
+		return;
+	}
 	setGameState("idle");
 	requestRender();
+	broadcastRoomSnapshot();
 });
 settingsDialog.addEventListener("change", (event) => {
-	if (event.target.matches('input[name="mode"], input[name="category"], #haptics-toggle')) {
+	if (event.target.matches('input[name="mode"], input[name="category"], #prompts-toggle, #haptics-toggle')) {
 		readSettingsControls(event.target);
+		broadcastRoomSnapshot();
 	}
 });
 
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("blur", clearInterruptedRound);
+window.addEventListener("hashchange", () => window.location.reload());
 document.addEventListener("visibilitychange", () => {
 	if (document.hidden) clearInterruptedRound();
 });
@@ -1047,6 +2135,8 @@ motionQuery.addEventListener?.("change", requestRender);
 syncSettingsControls();
 setGameState("idle");
 resizeCanvas();
+setRoomMode("local");
+initializeRoomFromLocation();
 
 if (
 	"serviceWorker" in navigator &&
@@ -1060,7 +2150,10 @@ if (
 		});
 	});
 	navigator.serviceWorker.addEventListener("controllerchange", () => {
-		if (hadServiceWorkerController) updateAvailable.hidden = false;
+		if (hadServiceWorkerController) {
+			updateReady = true;
+			updateAvailable.hidden = roomMode !== "local";
+		}
 	});
 	navigator.serviceWorker.addEventListener("message", (event) => {
 		if (event.data?.version) version.textContent = event.data.version;

@@ -1,0 +1,26 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check browser modules
+        run: |
+          node --check src/index.js
+          node --check src/prompts.js
+          node --check src/prompts-content.js
+          node --check src/room.js
+          node --check src/sw.js
+      - name: Run room protocol tests
+        run: node --test tests/room.test.mjs

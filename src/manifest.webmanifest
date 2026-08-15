@@ -1,9 +1,9 @@
 {
-	"name": "Chooser — Truth or Dare",
+	"name": "Chooser — Finger Picker",
 	"short_name": "Chooser",
 	"categories": ["entertainment", "games", "social", "utilities"],
-	"description": "An electric finger chooser with 1,000+ Truths and 1,000+ Dares.",
-	"lang": "en",
+	"description": "An electric finger chooser for one screen or a live room shared across phones.",
+	"lang": "en-KE",
 	"display": "standalone",
 	"start_url": "./",
 	"scope": "./",
