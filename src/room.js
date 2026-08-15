@@ -7,6 +7,17 @@ const TRYSTERO_PEER_ID_PATTERN = /^[A-Za-z0-9]{20}$/;
 const ROOM_HASH_PATTERN = /^#room=([A-Za-z0-9_-]{22})&host=([^&#=]+)$/;
 const BASE64URL_ALPHABET =
 	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+const ROOM_RELAY_URLS = Object.freeze([
+	// The first two also overlap with the v14 relay set during rollout.
+	"wss://nostr.data.haus",
+	"wss://relay-rpi.edufeed.org",
+	"wss://bucket.coracle.social",
+	"wss://basspistol.org",
+	"wss://nos.lol",
+	"wss://hornetstorage.net/relay",
+	"wss://nostr-01.uid.ovh",
+	"wss://koru.bitcointxoko.org",
+]);
 
 const noop = () => {};
 
@@ -174,6 +185,7 @@ export async function connectRoom({
 	onPeerLeave,
 	onState,
 	onIntent,
+	onSync,
 	onError,
 } = {}) {
 	if (!isValidRoomSecret(secret)) {
@@ -184,17 +196,18 @@ export async function connectRoom({
 	const handlePeerLeave = callbackOrNoop(onPeerLeave);
 	const handleState = callbackOrNoop(onState);
 	const handleIntent = callbackOrNoop(onIntent);
+	const handleSync = callbackOrNoop(onSync);
 	const handleError = callbackOrNoop(onError);
 
 	const { joinRoom, selfId } = await import(
-		"https://esm.sh/trystero@0.25.3?bundle"
+		"./vendor/trystero-nostr-0.25.3.js"
 	);
 	const room = joinRoom(
 		{
 			appId: "choosergame.vercel.app/realtime/v1",
 			password: secret,
 			relayConfig: {
-				redundancy: 3,
+				urls: ROOM_RELAY_URLS,
 				warnOnRelayFailure: false,
 			},
 		},
@@ -203,6 +216,7 @@ export async function connectRoom({
 	);
 	const stateAction = room.makeAction("state-v1");
 	const intentAction = room.makeAction("intent-v1");
+	const syncAction = room.makeAction("sync-v1");
 
 	room.onPeerJoin = handlePeerJoin;
 	room.onPeerLeave = handlePeerLeave;
@@ -210,6 +224,8 @@ export async function connectRoom({
 		handleState(data, metadata.peerId);
 	intentAction.onMessage = (data, metadata = {}) =>
 		handleIntent(data, metadata.peerId);
+	syncAction.onMessage = (_data, metadata = {}) =>
+		handleSync(metadata.peerId);
 
 	return {
 		selfId,
@@ -224,6 +240,12 @@ export async function connectRoom({
 				return Promise.reject(new TypeError("A target peer ID is required."));
 			}
 			return intentAction.send(data, { target });
+		},
+		sendSync(target) {
+			if (typeof target !== "string" || target.length === 0) {
+				return Promise.reject(new TypeError("A target peer ID is required."));
+			}
+			return syncAction.send(null, { target });
 		},
 		leave: () => room.leave(),
 	};

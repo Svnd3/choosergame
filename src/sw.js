@@ -1,11 +1,12 @@
 const CACHE_PREFIX = "chooser-";
-const CACHE_NAME = `${CACHE_PREFIX}v14`;
+const CACHE_NAME = `${CACHE_PREFIX}v15`;
 const APP_BASE = new URL("./", self.location.href);
 const CACHE_PATHS = [
 	"./",
 	"index.css",
 	"index.js",
 	"room.js",
+	"vendor/trystero-nostr-0.25.3.js",
 	"prompts.js",
 	"prompts-content.js",
 	"favicon.ico",

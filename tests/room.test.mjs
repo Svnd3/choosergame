@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -12,6 +14,11 @@ import {
 	parseRoomHash,
 	sanitizeFingerIntent,
 } from "../src/room.js";
+
+const VENDOR_BUNDLE_URL = new URL(
+	"../src/vendor/trystero-nostr-0.25.3.js",
+	import.meta.url,
+);
 
 test("room protocol constants stay compatible", () => {
 	assert.equal(ROOM_PROTOCOL_VERSION, 1);
@@ -165,4 +172,42 @@ test("invalid and sender-spoofed finger intents are rejected", () => {
 	);
 	assert.equal(sanitizeFingerIntent(null, peerId), null);
 	assert.equal(sanitizeFingerIntent([validMove], peerId), null);
+});
+
+test("vendored Trystero is the exact pinned ESM artifact", async () => {
+	const bundle = await readFile(VENDOR_BUNDLE_URL);
+
+	assert.equal(bundle.byteLength, 59_959);
+	assert.equal(
+		createHash("sha256").update(bundle).digest("hex"),
+		"673ed5914efae7a34eedeb4dc54f3ec18260a9c485874a822b065ee611992640",
+	);
+	assert.match(bundle.toString("utf8"), /Bundled license information/);
+});
+
+test("room transport loads locally with eight fixed relays and is cached by v15", async () => {
+	const [roomSource, workerSource, vendorNote] = await Promise.all([
+		readFile(new URL("../src/room.js", import.meta.url), "utf8"),
+		readFile(new URL("../src/sw.js", import.meta.url), "utf8"),
+		readFile(new URL("../src/vendor/README.md", import.meta.url), "utf8"),
+	]);
+
+	assert.match(
+		roomSource,
+		/import\(\s*["']\.\/vendor\/trystero-nostr-0\.25\.3\.js["']\s*\)/,
+	);
+	assert.doesNotMatch(roomSource, /https:\/\/esm\.sh\/trystero/);
+	assert.equal(roomSource.match(/"wss:\/\//g)?.length, 8);
+	assert.match(roomSource, /urls:\s*ROOM_RELAY_URLS/);
+	assert.doesNotMatch(roomSource, /communities\.nos\.social/);
+	assert.match(roomSource, /makeAction\(["']sync-v1["']\)/);
+	assert.match(roomSource, /sendSync\(target\)/);
+	assert.match(roomSource, /syncAction\.send\(null, \{ target \}\)/);
+	assert.match(workerSource, /CACHE_NAME = `\$\{CACHE_PREFIX\}v15`/);
+	assert.match(workerSource, /"vendor\/trystero-nostr-0\.25\.3\.js"/);
+	assert.match(vendorNote, /59,959-byte ESM bundle/);
+	assert.match(
+		vendorNote,
+		/673ed5914efae7a34eedeb4dc54f3ec18260a9c485874a822b065ee611992640/,
+	);
 });

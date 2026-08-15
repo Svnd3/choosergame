@@ -25,7 +25,8 @@ const ELECTRIC_DOT_SPEED = 1.15;
 const ROOM_MOVE_INTERVAL_MS = 40;
 const ROOM_RECEIVE_MOVE_INTERVAL_MS = 28;
 const ROOM_STATE_BROADCAST_INTERVAL_MS = 40;
-const ROOM_JOIN_TIMEOUT_MS = 18000;
+const ROOM_JOIN_TIMEOUT_MS = 35000;
+const ROOM_SYNC_RETRY_DELAYS_MS = [0, 1200, 3000, 7000, 12000, 20000];
 const ROOM_HOST_RECONNECT_GRACE_MS = 5000;
 const SETTINGS_STORAGE_KEY = "chooser-game-settings-v2";
 const DEFAULT_ACCENT = "#ff315f";
@@ -140,6 +141,7 @@ let roomHostDepartureTimeout = null;
 let roomSnapshotBroadcastTimeout = null;
 let roomLastSnapshotBroadcastAt = 0;
 let updateReady = false;
+const roomSyncRetryTimers = new Set();
 
 function loadSettings() {
 	const fallback = {
@@ -209,12 +211,57 @@ function clearRoomConnectionTimers() {
 	roomJoinTimeout = null;
 	roomHostDepartureTimeout = null;
 	roomSnapshotBroadcastTimeout = null;
+	for (const timer of roomSyncRetryTimers) window.clearTimeout(timer);
+	roomSyncRetryTimers.clear();
+}
+
+function scheduleRoomSnapshotRequests(peerId, connectionAttempt) {
+	if (isRoomHost() || peerId !== roomHostPeerId) return;
+
+	for (const delay of ROOM_SYNC_RETRY_DELAYS_MS) {
+		const timer = window.setTimeout(() => {
+			roomSyncRetryTimers.delete(timer);
+			if (
+				connectionAttempt !== roomConnectionAttempt ||
+				roomMode !== "joining" ||
+				!roomTransport ||
+				peerId !== roomHostPeerId
+			) {
+				return;
+			}
+			roomTransport.sendSync(peerId).catch(() => {});
+		}, delay);
+		roomSyncRetryTimers.add(timer);
+	}
+}
+
+function startRoomJoinTimeout(connectionAttempt) {
+	if (isRoomHost() || roomMode === "connected" || roomJoinTimeout !== null) return;
+
+	roomJoinTimeout = window.setTimeout(() => {
+		roomJoinTimeout = null;
+		if (connectionAttempt !== roomConnectionAttempt || roomMode === "connected") return;
+		roomConnectionAttempt += 1;
+		clearRoomConnectionTimers();
+		roomTransport?.leave();
+		roomTransport = null;
+		roomPeerIds.clear();
+		setRoomMode(
+			"error",
+			"We couldn’t connect to the host. Keep their room open, then try again or switch between Wi-Fi and mobile data.",
+		);
+		showRoomDialog();
+	}, ROOM_JOIN_TIMEOUT_MS);
 }
 
 function setRoomMode(nextMode, statusMessage = "") {
 	if (nextMode === "connected" && roomJoinTimeout !== null) {
 		window.clearTimeout(roomJoinTimeout);
 		roomJoinTimeout = null;
+	}
+	if (nextMode === "connected") {
+		for (const timer of roomSyncRetryTimers) window.clearTimeout(timer);
+		roomSyncRetryTimers.clear();
 	}
 	roomMode = nextMode;
 	roomStatusMessage = statusMessage;
@@ -244,8 +291,8 @@ function updateRoomDialog() {
 		: "Private room";
 	roomShare.hidden = !isRoomHost() || roomMode !== "connected" || !roomLink;
 	roomCopyLink.hidden = !isRoomHost() || roomMode !== "connected" || !roomLink;
-	roomEnter.hidden = roomMode === "error";
-	roomEnter.disabled = roomMode !== "connected";
+	roomEnter.hidden = false;
+	roomEnter.disabled = roomMode === "joining";
 
 	if (roomMode === "error") {
 		const hostEndedRoom = roomStatusMessage.includes("closed the room");
@@ -259,6 +306,7 @@ function updateRoomDialog() {
 			roomStatusMessage ||
 			"Return to local play, then create or open a fresh room link.";
 		roomStatusLine.textContent = "Room offline";
+		roomEnterLabel.textContent = "Try again";
 		return;
 	}
 
@@ -277,7 +325,7 @@ function updateRoomDialog() {
 	roomCopy.textContent =
 		roomMode === "connected"
 			? "Hold a finger anywhere. Every live touch appears on every screen."
-			: "Keep this page open while we connect you to the host.";
+			: roomStatusMessage || "Keep this page open while we connect you to the host.";
 	roomStatusLine.textContent = roomMode === "connected" ? deviceLabel : "Connecting securely";
 	roomEnterLabel.textContent = "Enter the board";
 }
@@ -864,30 +912,12 @@ async function connectSharedRoom(secret, role, expectedHostId = null) {
 		role === "guest" && expectedHostId
 			? makeRoomUrl(secret, expectedHostId, window.location.href)
 			: "";
-	localSettingsBeforeRoom = role === "guest" ? { ...settings, categories: [...settings.categories] } : null;
+	if (role === "guest" && !localSettingsBeforeRoom) {
+		localSettingsBeforeRoom = { ...settings, categories: [...settings.categories] };
+	} else if (role === "host") localSettingsBeforeRoom = null;
 	body.dataset.winnerDevice = "false";
 	setRoomMode("joining");
 	showRoomDialog();
-	if (role === "guest") {
-		roomJoinTimeout = window.setTimeout(() => {
-			roomJoinTimeout = null;
-			if (
-				connectionAttempt !== roomConnectionAttempt ||
-				roomMode === "connected"
-			) {
-				return;
-			}
-			roomConnectionAttempt += 1;
-			roomTransport?.leave();
-			roomTransport = null;
-			roomPeerIds.clear();
-			setRoomMode(
-				"error",
-				"We couldn’t find the room host. Ask them to create and share a fresh link.",
-			);
-			showRoomDialog();
-		}, ROOM_JOIN_TIMEOUT_MS);
-	}
 
 	try {
 		const transport = await connectRoom({
@@ -901,6 +931,7 @@ async function connectSharedRoom(secret, role, expectedHostId = null) {
 				}
 				updateRoomChrome();
 				if (isRoomHost()) window.queueMicrotask(() => broadcastRoomSnapshot(peerId));
+				else scheduleRoomSnapshotRequests(peerId, connectionAttempt);
 			},
 			onPeerLeave(peerId) {
 				if (connectionAttempt === roomConnectionAttempt) {
@@ -915,6 +946,11 @@ async function connectSharedRoom(secret, role, expectedHostId = null) {
 				const intent = sanitizeFingerIntent(payload, peerId);
 				if (intent) handleRoomFingerIntent(intent, peerId);
 			},
+			onSync(peerId) {
+				if (connectionAttempt === roomConnectionAttempt && isRoomHost()) {
+					broadcastRoomSnapshot(peerId);
+				}
+			},
 			onError(details) {
 				if (connectionAttempt !== roomConnectionAttempt) return;
 				const message = typeof details?.error === "string" ? details.error : "Peer connection failed.";
@@ -924,13 +960,10 @@ async function connectSharedRoom(secret, role, expectedHostId = null) {
 					roomMode !== "connected" &&
 					(!details?.peerId || details.peerId === roomHostPeerId)
 				) {
-					roomConnectionAttempt += 1;
-					clearRoomConnectionTimers();
-					roomTransport?.leave();
-					roomTransport = null;
-					roomPeerIds.clear();
-					setRoomMode("error", "We couldn’t reach this room. Ask the host for a fresh link and try again.");
-					showRoomDialog();
+					setRoomMode(
+						"joining",
+						"This connection is taking longer than usual. Keep both room pages open while we retry.",
+					);
 				}
 			},
 		});
@@ -952,7 +985,13 @@ async function connectSharedRoom(secret, role, expectedHostId = null) {
 			replaceLocationWithRoom(secret, transport.selfId);
 			setRoomMode("connected");
 			broadcastRoomSnapshot();
-		} else updateRoomChrome();
+		} else {
+			startRoomJoinTimeout(connectionAttempt);
+			if (roomPeerIds.has(roomHostPeerId)) {
+				scheduleRoomSnapshotRequests(roomHostPeerId, connectionAttempt);
+			}
+			updateRoomChrome();
+		}
 	} catch (error) {
 		if (connectionAttempt !== roomConnectionAttempt) return;
 		console.error("Shared room could not start:", error);
@@ -976,6 +1015,14 @@ function createSharedRoom() {
 	const secret = createRoomSecret();
 	prepareNextRound({ broadcast: false });
 	void connectSharedRoom(secret, "host");
+}
+
+function retrySharedRoom() {
+	if (roomMode !== "error" || !roomSecret) return;
+	const role = roomRole;
+	const expectedHostId = role === "guest" ? roomHostPeerId : null;
+	prepareNextRound({ broadcast: false });
+	void connectSharedRoom(roomSecret, role, expectedHostId);
 }
 
 function restoreLocalSettings() {
@@ -2086,6 +2133,7 @@ roomShare.addEventListener("click", () => void shareRoomInvite());
 roomCopyLink.addEventListener("click", () => void copyRoomInvite());
 roomEnter.addEventListener("click", () => {
 	if (roomMode === "connected") closeRoomDialog();
+	else if (roomMode === "error") retrySharedRoom();
 });
 roomLeave.addEventListener("click", leaveSharedRoom);
 roomClose.addEventListener("click", () => {
