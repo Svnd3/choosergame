@@ -1232,12 +1232,11 @@ function normalizeRoomCodeDraft(value) {
 		.replace(/[IL]/g, "1")
 		.replace(/O/g, "0")
 		.replace(/[^0-9A-HJKMNP-TV-Z]/g, "")
-		.slice(0, 12);
+		.slice(0, 6);
 }
 
 function formatRoomCodeDraft(value) {
-	const compact = normalizeRoomCodeDraft(value);
-	return compact.match(/.{1,4}/g)?.join("-") ?? "";
+	return normalizeRoomCodeDraft(value);
 }
 
 function showRoomLobby() {
@@ -1276,7 +1275,7 @@ async function joinSharedRoomByCode(value) {
 	if (roomMode !== "local" || roomLobbyBusy) return;
 	const code = normalizeRoomCode(value);
 	if (!code) {
-		setRoomCodeError("Enter the complete 12-character room code.");
+		setRoomCodeError("Enter the complete 6-character room code.");
 		roomCodeInput.focus();
 		return;
 	}
@@ -2439,9 +2438,7 @@ roomCodeInput.addEventListener("input", () => {
 		roomCodeInput.value.slice(0, caret),
 	).length;
 	roomCodeInput.value = formatRoomCodeDraft(roomCodeInput.value);
-	const formattedCaret =
-		charactersBeforeCaret + Math.floor(Math.max(0, charactersBeforeCaret - 1) / 4);
-	roomCodeInput.setSelectionRange(formattedCaret, formattedCaret);
+	roomCodeInput.setSelectionRange(charactersBeforeCaret, charactersBeforeCaret);
 	if (!roomCodeError.hidden) setRoomCodeError();
 });
 roomStatusButton.addEventListener("click", showRoomDialog);

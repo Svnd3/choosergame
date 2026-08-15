@@ -1,12 +1,12 @@
-export const ROOM_PROTOCOL_VERSION = 1;
+export const ROOM_PROTOCOL_VERSION = 2;
 export const MAX_ROOM_PLAYERS = 12;
 
 const ROOM_SECRET_BYTES = 16;
 const ROOM_SECRET_PATTERN = /^[A-Za-z0-9_-]{22}$/;
-const ROOM_CODE_LENGTH = 12;
-const ROOM_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{12}$/;
+const ROOM_CODE_LENGTH = 6;
+const ROOM_CODE_PATTERN = /^[0-9A-HJKMNP-TV-Z]{6}$/;
 const ROOM_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-const ROOM_CODE_KDF_SALT = "choosergame.vercel.app/room-code/v1";
+const ROOM_CODE_KDF_SALT = "choosergame.vercel.app/room-code/v2";
 const ROOM_CODE_KDF_ITERATIONS = 150000;
 const ROOM_AUTH_PUBLIC_KEY_BYTES = 65;
 const ROOM_AUTH_SIGNATURE_BYTES = 64;
@@ -177,7 +177,7 @@ export function normalizeRoomCode(value) {
 export function formatRoomCode(value) {
 	const normalized = normalizeRoomCode(value);
 	if (!normalized) return null;
-	return normalized.match(/.{4}/g).join("-");
+	return normalized;
 }
 
 export function createRoomCode() {
@@ -453,19 +453,19 @@ export async function connectRoom({
 	);
 	const room = joinRoom(
 		{
-			appId: "choosergame.vercel.app/realtime/v1",
+			appId: "choosergame.vercel.app/realtime/v2",
 			password: secret,
 			relayConfig: {
 				urls: ROOM_RELAY_URLS,
 				warnOnRelayFailure: false,
 			},
 		},
-		`chooser-${secret}`,
+		`chooser-v2-${secret}`,
 		{ onJoinError: handleError },
 	);
-	const stateAction = room.makeAction("state-v1");
-	const intentAction = room.makeAction("intent-v1");
-	const syncAction = room.makeAction("sync-v1");
+	const stateAction = room.makeAction("state-v2");
+	const intentAction = room.makeAction("intent-v2");
+	const syncAction = room.makeAction("sync-v2");
 
 	room.onPeerJoin = handlePeerJoin;
 	room.onPeerLeave = handlePeerLeave;

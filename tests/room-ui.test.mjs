@@ -30,3 +30,11 @@ test("shared-room card uses local system font fallbacks", () => {
 		/#room-dialog \{[\s\S]*?font-family: ui-rounded, "Avenir Next", "Segoe UI", sans-serif;/,
 	);
 });
+
+test("shared-room entry uses compact six-character codes", () => {
+	assert.match(htmlSource, /maxlength="6"/);
+	assert.match(htmlSource, /placeholder="A7K9P2"/);
+	assert.match(scriptSource, /\.slice\(0, 6\)/);
+	assert.match(scriptSource, /Enter the complete 6-character room code\./);
+	assert.doesNotMatch(htmlSource, /ABCD-EFGH-JKMP/);
+});
